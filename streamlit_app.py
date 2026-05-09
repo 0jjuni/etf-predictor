@@ -71,7 +71,7 @@ def _render_news_cards(articles: list[dict]) -> str:
             f"<div class='news-title'>{title}</div>"
             f"</a>"
         )
-    return "".join(parts)
+    return f"<div class='news-list'>{''.join(parts)}</div>"
 
 
 st.set_page_config(
@@ -175,13 +175,20 @@ st.markdown(
       hr { margin: 1.6rem 0; border: 0; border-top: 1px solid var(--slate-200); }
 
       /* News cards */
+      .news-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0;
+      }
+      .news-list > .news-card:first-child { margin-top: 0; }
       .news-card {
         display: block;
         background: white;
         border: 1px solid var(--slate-200);
         border-radius: 10px;
         padding: 12px 14px;
-        margin-bottom: 8px;
+        margin: 0;
         text-decoration: none !important;
         transition: border-color 0.15s ease, background 0.15s ease;
       }
