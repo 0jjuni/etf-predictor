@@ -37,29 +37,134 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 2rem; padding-bottom: 4rem; }
-      h1 { font-size: 1.8rem; font-weight: 700; }
-      h2 { font-size: 1.3rem; }
-      h3 { font-size: 1.05rem; }
-      [data-testid="stMetricLabel"] { font-size: 0.85rem; }
-      [data-testid="stMetricValue"] { font-size: 1.4rem; }
-      .small-caption { color: #64748b; font-size: 0.85rem; line-height: 1.4; }
-      .big-date { font-size: 1.05rem; font-weight: 600; color: #0f172a; }
+      :root {
+        --primary: #4f46e5;
+        --primary-bg: #eef2ff;
+        --slate-800: #1e293b;
+        --slate-600: #475569;
+        --slate-400: #94a3b8;
+        --slate-200: #e2e8f0;
+        --slate-50:  #f8fafc;
+      }
+      .block-container { padding-top: 1.5rem; padding-bottom: 4rem; max-width: 760px; }
+
+      /* Hero */
+      .hero {
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        border-radius: 18px;
+        padding: 26px 30px;
+        color: white;
+        margin-bottom: 28px;
+        box-shadow: 0 6px 24px -8px rgba(79, 70, 229, 0.4);
+      }
+      .hero .eyebrow {
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        opacity: 0.85;
+        margin-bottom: 6px;
+      }
+      .hero h1 {
+        color: white !important;
+        font-size: 1.65rem;
+        font-weight: 700;
+        margin: 0 0 10px 0;
+        line-height: 1.25;
+      }
+      .hero p {
+        color: rgba(255,255,255,0.9);
+        font-size: 0.92rem;
+        line-height: 1.55;
+        margin: 0;
+      }
+
+      /* Headings */
+      h2 { font-size: 1.2rem; color: var(--slate-800); margin-top: 1.4rem; }
+      h3 { font-size: 1.0rem; color: var(--slate-600); }
+
+      /* Date pill */
+      .date-pill {
+        display: inline-block;
+        background: var(--primary-bg);
+        color: var(--primary);
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      /* Metric cards */
+      [data-testid="stMetric"] {
+        background: white;
+        border: 1px solid var(--slate-200);
+        border-left: 3px solid var(--primary);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      [data-testid="stMetricLabel"] { font-size: 0.8rem; color: var(--slate-600); }
+      [data-testid="stMetricValue"] { font-size: 1.5rem; font-weight: 700; color: var(--slate-800); }
+
+      /* Tabs */
+      .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 1px solid var(--slate-200);
+      }
+      .stTabs [data-baseweb="tab"] {
+        padding: 10px 16px;
+        font-weight: 500;
+      }
+      .stTabs [aria-selected="true"] {
+        color: var(--primary) !important;
+      }
+
+      /* Alerts softer */
+      .stAlert { border-radius: 10px; }
+
+      /* Captions */
+      .small-caption { color: var(--slate-600); font-size: 0.85rem; line-height: 1.55; }
+
+      /* Section divider — subtler than default */
+      hr { margin: 1.6rem 0; border: 0; border-top: 1px solid var(--slate-200); }
+
+      /* Footer */
+      .footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--slate-200);
+        color: var(--slate-400);
+        font-size: 0.8rem;
+        text-align: center;
+      }
+      .footer a { color: var(--slate-400); text-decoration: underline; }
+
+      /* Mobile */
+      @media (max-width: 640px) {
+        .block-container { padding: 1rem; }
+        .hero { padding: 20px 22px; border-radius: 14px; }
+        .hero h1 { font-size: 1.35rem; }
+        [data-testid="stMetricValue"] { font-size: 1.25rem; }
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("ETF 종가 예측기")
 st.markdown(
-    "<div class='small-caption'>"
-    "한국 ETF 중에서 <b>다음 거래일 종가</b>가 직전 거래일 종가 대비 "
-    "<b>+2.5% 이상</b> 오를 가능성이 높은 종목을 매일 추천합니다. "
-    "매일 KST 08:00에 모델이 자동으로 다시 학습됩니다."
-    "</div>",
+    """
+    <div class="hero">
+      <div class="eyebrow">KOREAN ETF · DAILY SIGNAL</div>
+      <h1>ETF 종가 예측기</h1>
+      <p>
+        한국 ETF 중에서 <b>다음 거래일 종가</b>가 직전 거래일 종가 대비
+        <b>+2.5% 이상</b> 오를 가능성이 높은 종목을 매일 자동으로 추천합니다.
+        매일 KST 08:00에 모델이 다시 학습됩니다.
+      </p>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
-st.write("")
 
 
 # --------------------------------------------------------------------------- #
@@ -120,7 +225,7 @@ with tab_picks:
     else:
         date_label = _format_korean_date(target_date)
         st.markdown(
-            f"<div class='big-date'>예측 대상일 · {date_label}</div>",
+            f"<span class='date-pill'>예측 대상일 · {date_label}</span>",
             unsafe_allow_html=True,
         )
         st.caption(
@@ -469,9 +574,15 @@ with tab_model:
             """
         )
 
-    st.divider()
-    st.caption(
-        f"최종 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M')}  ·  "
-        "데이터 출처: [FinanceDataReader](https://github.com/FinanceData/FinanceDataReader)  ·  "
-        "코드: [GitHub](https://github.com/0jjuni/etf-predictor)"
-    )
+st.markdown(
+    f"""
+    <div class="footer">
+      최종 업데이트 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+      &nbsp;&middot;&nbsp;
+      데이터 <a href="https://github.com/FinanceData/FinanceDataReader" target="_blank">FinanceDataReader</a>
+      &nbsp;&middot;&nbsp;
+      코드 <a href="https://github.com/0jjuni/etf-predictor" target="_blank">GitHub</a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
