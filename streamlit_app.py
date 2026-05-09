@@ -28,6 +28,52 @@ def _format_korean_date(target_date: str | None) -> str:
     return f"{ts.date()} ({WEEKDAY_KR[ts.dayofweek]})"
 
 
+def _format_news_date(raw: str) -> str:
+    """RFC 2822 → '5월 6일' style. Returns '' on parse failure."""
+    if not raw:
+        return ""
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(raw)
+        return f"{dt.month}월 {dt.day}일"
+    except Exception:
+        return ""
+
+
+def _escape_html(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _render_news_cards(articles: list[dict]) -> str:
+    """Stitch a list of articles into one HTML block of stylized cards."""
+    if not articles:
+        return "<div class='news-empty'>관련 기사를 찾지 못했습니다.</div>"
+    parts: list[str] = []
+    for a in articles:
+        title = _escape_html(a.get("title", "").strip())
+        url = _escape_html(a.get("url", "#").strip())
+        source = _escape_html(a.get("source", "").strip())
+        date = _format_news_date(a.get("published", ""))
+        meta_inner = ""
+        if source:
+            meta_inner += f"<span class='news-source'>{source}</span>"
+        if date:
+            meta_inner += f"<span class='news-date'>{date}</span>"
+        meta_block = f"<div class='news-meta'>{meta_inner}</div>" if meta_inner else ""
+        parts.append(
+            f"<a class='news-card' href='{url}' target='_blank' rel='noopener noreferrer'>"
+            f"{meta_block}"
+            f"<div class='news-title'>{title}</div>"
+            f"</a>"
+        )
+    return "".join(parts)
+
+
 st.set_page_config(
     page_title="ETF 종가 예측기",
     page_icon=":chart_with_upwards_trend:",
@@ -127,6 +173,50 @@ st.markdown(
 
       /* Section divider — subtler than default */
       hr { margin: 1.6rem 0; border: 0; border-top: 1px solid var(--slate-200); }
+
+      /* News cards */
+      .news-card {
+        display: block;
+        background: white;
+        border: 1px solid var(--slate-200);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 8px;
+        text-decoration: none !important;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .news-card:hover {
+        border-color: var(--primary);
+        background: var(--primary-bg);
+      }
+      .news-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 0.75rem;
+        margin-bottom: 6px;
+      }
+      .news-source {
+        color: var(--slate-600);
+        font-weight: 600;
+        background: var(--slate-100, var(--slate-50));
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .news-date { color: var(--slate-400); }
+      .news-title {
+        color: var(--slate-800);
+        font-weight: 500;
+        font-size: 0.93rem;
+        line-height: 1.45;
+      }
+      .news-card:hover .news-title { color: var(--primary); }
+      .news-empty {
+        color: var(--slate-400);
+        font-size: 0.85rem;
+        font-style: italic;
+        padding: 6px 0;
+      }
 
       /* Footer */
       .footer {
@@ -280,15 +370,13 @@ with tab_picks:
                         articles = fp.get("news_json") or []
                         if not articles:
                             continue
-                        with st.expander(f"{fp['symbol']}  ·  {fp['name']}"):
-                            for a in articles:
-                                src = f"  ·  *{a['source']}*" if a.get("source") else ""
-                                pub = (
-                                    f"  ·  {a['published'][:16]}"
-                                    if a.get("published")
-                                    else ""
-                                )
-                                st.markdown(f"- [{a['title']}]({a['url']}){src}{pub}")
+                        with st.expander(
+                            f"{fp['symbol']}  ·  {fp['name']}", expanded=True
+                        ):
+                            st.markdown(
+                                _render_news_cards(articles),
+                                unsafe_allow_html=True,
+                            )
             else:
                 st.warning(
                     f"**{date_label}에는 추천할 종목이 없습니다.**  \n"
@@ -340,11 +428,8 @@ with tab_picks:
                 if not articles:
                     continue
                 any_news = True
-                with st.expander(f"{row['symbol']}  ·  {row['name']}"):
-                    for a in articles:
-                        src = f"  ·  *{a['source']}*" if a.get("source") else ""
-                        pub = f"  ·  {a['published'][:16]}" if a.get("published") else ""
-                        st.markdown(f"- [{a['title']}]({a['url']}){src}{pub}")
+                with st.expander(f"{row['symbol']}  ·  {row['name']}", expanded=True):
+                    st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
             if not any_news:
                 st.info("아직 적재된 기사 데이터가 없습니다 — 다음 학습 후 채워집니다.")
 
