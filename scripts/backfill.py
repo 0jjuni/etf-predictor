@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
 # Make `app`, `ml` importable when run as `python scripts/backfill.py`
@@ -34,11 +33,11 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from app.db import insert_predictions, upsert_model_metrics
-from ml.config import THRESHOLD_GRID
-from ml.data import KST, fetch_etf_universe, recent_trading_dates
+from ml.data import fetch_etf_universe, recent_trading_dates
 from ml.train import (
     attach_outcomes,
     build_dataset,
+    compute_fallback_picks,
     fetch_universe_histories,
     make_predictions,
     train_model,
@@ -82,16 +81,22 @@ def main() -> None:
         log.info("  dataset: %s, positive rate=%.4f", X.shape, y.mean())
 
         model, holdout = train_model(X, y)
+
+        preds = make_predictions(model, today_rows, target_str)
+        attach_outcomes(preds, histories, target_str)
+
+        fallback: list[dict] = []
+        if not preds:
+            fallback = compute_fallback_picks(model, today_rows, holdout["curve"])
+
         upsert_model_metrics(
             target_date=target_str,
             test_size=holdout["test_size"],
             positive_rate=holdout["positive_rate"],
             curve=holdout["curve"],
+            fallback_picks=fallback or None,
         )
-        log.info("  model_metrics written")
-
-        preds = make_predictions(model, today_rows, target_str)
-        attach_outcomes(preds, histories, target_str)
+        log.info("  model_metrics written (fallback=%d)", len(fallback))
 
         if preds:
             hits = sum(1 for p in preds if p.get("outcome"))
@@ -103,7 +108,10 @@ def main() -> None:
             )
             insert_predictions(preds)
         else:
-            log.info("  no predictions above threshold")
+            log.info(
+                "  no predictions above threshold (fallback picks: %s)",
+                [f"{p['symbol']}@{p['probability']:.3f}" for p in fallback],
+            )
 
 
 if __name__ == "__main__":

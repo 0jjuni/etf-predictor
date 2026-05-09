@@ -106,16 +106,19 @@ def upsert_model_metrics(
     test_size: int,
     positive_rate: float,
     curve: list[dict],
+    *,
+    fallback_picks: list[dict] | None = None,
 ) -> None:
-    """Write the holdout threshold curve for one training run."""
+    """Write the holdout threshold curve + optional fallback picks for one run."""
+    payload: dict = {
+        "target_date": target_date,
+        "test_size": int(test_size),
+        "positive_rate": float(positive_rate),
+        "metrics_json": curve,
+        "fallback_picks_json": fallback_picks,
+    }
     _client("service").table(METRICS_TABLE).upsert(
-        {
-            "target_date": target_date,
-            "test_size": int(test_size),
-            "positive_rate": float(positive_rate),
-            "metrics_json": curve,
-        },
-        on_conflict="target_date",
+        payload, on_conflict="target_date"
     ).execute()
 
 

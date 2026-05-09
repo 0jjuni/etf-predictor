@@ -129,12 +129,68 @@ with tab_picks:
         )
 
         if preds_df.empty:
-            st.warning(
-                f"**{date_label}에는 추천할 종목이 없습니다.**  \n"
-                "모델은 모든 한국 ETF에 대해 상승 확률을 계산했지만, "
-                "이번에는 추천 기준선(70%)을 넘는 종목이 없었어요. "
-                "시장이 잠잠하거나 뚜렷한 모멘텀 신호가 없는 날이라는 뜻입니다."
-            )
+            fallback = (metrics or {}).get("fallback_picks_json") or []
+            if fallback:
+                st.warning(
+                    f"**{date_label} — 정상 추천 기준선(70%)을 통과한 종목이 없습니다.**  \n"
+                    "아래는 **참고용**으로만 제공되는, 모델이 그래도 가장 가능성을 높게 본 종목입니다. "
+                    "정밀도가 낮은 구간이므로 **반드시 뉴스·재무 등 다른 정보와 함께** 검토하세요. "
+                    "이 결과는 검증 기록(누적 적중률 계산)에 포함되지 않습니다."
+                )
+
+                st.subheader("참고 종목 (낮은 신뢰도)")
+                fb_df = pd.DataFrame(fallback)
+                fb_view = pd.DataFrame(
+                    {
+                        "코드": fb_df["symbol"],
+                        "종목명": fb_df["name"],
+                        "상승확률": (fb_df["probability"].astype(float) * 100).round(1),
+                        "예상정밀도": (
+                            fb_df["precision_band"].astype(float) * 100
+                        ).round(1),
+                    }
+                )
+                st.dataframe(
+                    fb_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "코드": st.column_config.TextColumn(width="small"),
+                        "종목명": st.column_config.TextColumn(width="medium"),
+                        "상승확률": st.column_config.ProgressColumn(
+                            help="모델이 추정한 +2.5% 상승 확률 (70% 미만)",
+                            format="%.1f%%",
+                            min_value=0,
+                            max_value=100,
+                        ),
+                        "예상정밀도": st.column_config.NumberColumn(
+                            help="이 확률대 종목들이 테스트셋에서 실제로 +2.5% 상승한 비율",
+                            format="%.1f%%",
+                        ),
+                    },
+                )
+                if any((fp.get("news_json") or []) for fp in fallback):
+                    st.subheader("관련 기사")
+                    for fp in fallback:
+                        articles = fp.get("news_json") or []
+                        if not articles:
+                            continue
+                        with st.expander(f"{fp['symbol']}  ·  {fp['name']}"):
+                            for a in articles:
+                                src = f"  ·  *{a['source']}*" if a.get("source") else ""
+                                pub = (
+                                    f"  ·  {a['published'][:16]}"
+                                    if a.get("published")
+                                    else ""
+                                )
+                                st.markdown(f"- [{a['title']}]({a['url']}){src}{pub}")
+            else:
+                st.warning(
+                    f"**{date_label}에는 추천할 종목이 없습니다.**  \n"
+                    "모델은 모든 한국 ETF에 대해 상승 확률을 계산했지만, "
+                    "이번에는 추천 기준선(70%)을 넘는 종목이 없었어요. "
+                    "시장이 잠잠하거나 뚜렷한 모멘텀 신호가 없는 날이라는 뜻입니다."
+                )
         else:
             st.markdown(f"**{len(preds_df)}개 종목 추천**")
             view = preds_df[["symbol", "name", "probability"]].copy()
@@ -309,12 +365,12 @@ with tab_model:
         - 100개 종목을 추천해서 30개가 맞히는 것보다,
           5개를 추천해서 4개가 맞히는 게 실제 수익에 더 도움이 됩니다
         - 그래서 추천 기준선을 **상승 확률 70% 이상**이라는 높은 값으로 설정했습니다
-        - 결과적으로 **재현율(놓친 상승 종목 수)은 높아지지만**,
-          **추천된 종목 하나하나의 적중률은 더 신뢰할만한 수준**이 돼요
+        - 결과적으로 **놓치는 상승 종목 수는 늘어나지만 (= 재현율 하락)**,
+          **추천된 종목 하나하나의 적중률은 더 신뢰할만한 수준**이 됩니다
         - "오늘 추천 없음"인 날도 정상입니다 — 신뢰도 낮은 신호를 억지로 만들지 않는다는 뜻입니다
 
-        > 임계값 곡선에서 T를 0.5에서 0.7, 0.8, 0.9로 올릴수록
-        > 정밀도가 가파르게 상승하는 걸 직접 확인할 수 있습니다.
+        > 아래 임계값 곡선에서 임계값을 올릴수록 정밀도가 가파르게 상승하고
+        > 재현율은 하락하는 걸 확인할 수 있어요.
         """
     )
 
@@ -354,13 +410,14 @@ with tab_model:
             show["threshold"] = show["threshold"].map(lambda v: f"{v:.2f}")
             for col in ("precision", "recall", "f1"):
                 show[col] = (show[col] * 100).round(2)
-            show.columns = ["임계값", "정밀도(%)", "재현율(%)", "F1(%)", "후보수", "양성수"]
+            show.columns = ["임계값", "정밀도(%)", "재현율(%)", "F1(%)", "추천 후보 수", "적중 수"]
             st.dataframe(show, use_container_width=True, hide_index=True)
             st.caption(
                 "정밀도 = 추천한 종목 중 실제 +2.5% 오른 비율  ·  "
                 "재현율 = 실제 +2.5% 오른 종목 중 모델이 잡아낸 비율  ·  "
-                "F1 = 둘의 조화평균  ·  "
-                "후보수 = 임계값 이상으로 분류된 검증 샘플 수"
+                "F1 = 정밀도와 재현율의 조화평균  ·  "
+                "추천 후보 수 = 해당 임계값을 넘은 검증 표본 수  ·  "
+                "적중 수 = 그중 실제로 +2.5% 오른 표본 수"
             )
 
     st.subheader("이용 시 유의사항")

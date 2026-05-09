@@ -59,8 +59,16 @@ ARTIFACT_DIR = Path(os.environ.get("ARTIFACT_DIR", "artifacts"))
 
 
 def _target_date_str(now: datetime) -> str:
-    base = now if now.hour < 18 else now + timedelta(days=1)
-    return base.date().isoformat()
+    """Next trading date the prediction applies to.
+
+    KRX is closed on weekends. We don't track public holidays here — those days
+    just produce a "0 picks today" naturally because the FDR history won't
+    advance past the previous trading day.
+    """
+    base = now.date() if now.hour < 18 else (now + timedelta(days=1)).date()
+    while base.weekday() >= 5:  # 5=Sat, 6=Sun
+        base += timedelta(days=1)
+    return base.isoformat()
 
 
 # --------------------------------------------------------------------------- #
@@ -248,6 +256,71 @@ def make_predictions(
     return out
 
 
+def _precision_at_band(prob: float, curve: list[dict]) -> float | None:
+    """Highest threshold the prob crosses; return its precision (None if below grid)."""
+    sorted_curve = sorted(curve, key=lambda r: r["threshold"])
+    best: float | None = None
+    for row in sorted_curve:
+        if prob >= row["threshold"]:
+            best = row.get("precision")
+        else:
+            break
+    return best
+
+
+def compute_fallback_picks(
+    model: XGBClassifier,
+    today_rows: list[tuple[str, str, np.ndarray]],
+    holdout_curve: list[dict],
+    *,
+    max_picks: int = 2,
+) -> list[dict]:
+    """Top-N highest-proba ETFs to surface when nothing crosses PROB_THRESHOLD.
+
+    Walks down THRESHOLD_GRID from PROB_THRESHOLD - 0.05 until at least one ETF
+    crosses; reports each pick's precision at the *band* (highest crossed
+    threshold) so users see the calibrated quality of the recommendation.
+
+    Returns [] if today_rows is empty.
+    """
+    from ml.config import THRESHOLD_GRID
+
+    if not today_rows:
+        return []
+    X = np.vstack([r[2] for r in today_rows])
+    proba = model.predict_proba(X)[:, 1]
+
+    descending = sorted(
+        [t for t in THRESHOLD_GRID if t < PROB_THRESHOLD], reverse=True
+    )
+    chosen_threshold: float | None = None
+    chosen_indices: list[int] = []
+    for t in descending:
+        idxs = [i for i, p in enumerate(proba) if p >= t]
+        if idxs:
+            chosen_threshold = t
+            chosen_indices = sorted(idxs, key=lambda i: -proba[i])[:max_picks]
+            break
+
+    if not chosen_indices:
+        return []
+
+    picks: list[dict] = []
+    for idx in chosen_indices:
+        sym, name, _ = today_rows[idx]
+        p = float(proba[idx])
+        picks.append(
+            {
+                "symbol": sym,
+                "name": name,
+                "probability": p,
+                "precision_band": _precision_at_band(p, holdout_curve),
+                "fallback_threshold": chosen_threshold,
+            }
+        )
+    return picks
+
+
 def attach_outcomes(
     predictions: list[dict],
     histories: dict[str, pd.DataFrame],
@@ -326,17 +399,29 @@ def main() -> None:
     model, holdout = train_model(X, y)
     save_model(model)
 
+    preds = make_predictions(model, today_rows, target_date)
+    log.info("Predictions above threshold: %d", len(preds))
+    for p in preds[:20]:
+        log.info("  %s %s  prob=%.3f", p["symbol"], p["name"], p["probability"])
+
+    fallback: list[dict] = []
+    if not preds:
+        fallback = compute_fallback_picks(model, today_rows, holdout["curve"])
+        for fp in fallback:
+            fp["news_json"] = fetch_news(fp["name"])
+        log.info(
+            "Fallback picks (display-only): %d at threshold=%s",
+            len(fallback),
+            fallback[0]["fallback_threshold"] if fallback else None,
+        )
+
     upsert_model_metrics(
         target_date=target_date,
         test_size=holdout["test_size"],
         positive_rate=holdout["positive_rate"],
         curve=holdout["curve"],
+        fallback_picks=fallback or None,
     )
-
-    preds = make_predictions(model, today_rows, target_date)
-    log.info("Predictions above threshold: %d", len(preds))
-    for p in preds[:20]:
-        log.info("  %s %s  prob=%.3f", p["symbol"], p["name"], p["probability"])
 
     if preds:
         for pred in preds:

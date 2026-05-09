@@ -54,6 +54,13 @@ create table if not exists model_metrics (
     created_at     timestamptz not null default now()
 );
 
+-- fallback_picks_json: top-N highest-probability ETFs when no regular pick
+-- crossed PROB_THRESHOLD. Display-only; never feeds the predictions table or
+-- empirical-precision computation. Schema:
+-- [{symbol, name, probability, precision_band, fallback_threshold, news_json}, ...]
+alter table model_metrics
+    add column if not exists fallback_picks_json jsonb;
+
 alter table model_metrics enable row level security;
 
 drop policy if exists "model_metrics_read_anon" on model_metrics;
