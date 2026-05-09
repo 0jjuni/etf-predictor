@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -69,18 +70,35 @@ def fetch_universe_histories(
     universe: pd.DataFrame,
     *,
     desc: str = "fetch",
+    max_workers: int = 16,
 ) -> dict[str, pd.DataFrame]:
-    """Fetch FDR history for every symbol once. Skips symbols that error out.
+    """Fetch FDR history for every symbol. Skips symbols that error out.
 
-    Returns a dict keyed by Symbol. The DataFrames are the raw FDR output
-    (no early-hours trimming) — callers apply cutoffs themselves.
+    HTTP-bound, so we use a thread pool. Tunable via the FDR_WORKERS env
+    var; defaults to 16. Returns a dict keyed by Symbol — DataFrames are
+    raw FDR output (no early-hours trimming).
     """
+    workers = int(os.environ.get("FDR_WORKERS", max_workers))
     out: dict[str, pd.DataFrame] = {}
-    for row in tqdm(universe.itertuples(index=False), total=len(universe), desc=desc):
+
+    def _one(symbol: str, name: str) -> tuple[str, str, pd.DataFrame | None, str | None]:
         try:
-            out[row.Symbol] = fetch_history(row.Symbol)
+            return symbol, name, fetch_history(symbol), None
         except Exception as e:  # noqa: BLE001
-            log.warning("skip fetch %s (%s): %s", row.Symbol, row.Name, e)
+            return symbol, name, None, repr(e)
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [
+            ex.submit(_one, row.Symbol, row.Name)
+            for row in universe.itertuples(index=False)
+        ]
+        for fut in tqdm(as_completed(futures), total=len(futures), desc=desc):
+            sym, name, df, err = fut.result()
+            if df is not None:
+                out[sym] = df
+            else:
+                log.warning("skip fetch %s (%s): %s", sym, name, err)
+
     return out
 
 
