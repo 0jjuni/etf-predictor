@@ -1,0 +1,36 @@
+name: daily-train
+
+on:
+  schedule:
+    # 23:00 UTC = 08:00 KST. GitHub cron is best-effort (a few minutes of jitter).
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      XGB_DEVICE: cpu
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies from uv.lock
+        run: uv sync --frozen --no-dev
+
+      - name: Train + predict + write to Supabase
+        run: uv run python -m ml.train
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: etf-model-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 14

@@ -1,0 +1,35 @@
+[project]
+name = "etf-predictor"
+version = "0.1.0"
+description = "Korean ETF next-day rise predictor (XGBoost + Streamlit + Supabase)"
+requires-python = ">=3.12"
+dependencies = [
+    "finance-datareader>=0.9.110",
+    "pandas>=2.3",
+    "numpy>=2.4",
+    "scikit-learn>=1.8",
+    "xgboost>=2.1",
+    "joblib>=1.5",
+    "streamlit>=1.57",
+    "supabase>=2.30",
+    "python-dotenv>=1.2",
+    "huggingface-hub>=0.36",
+    "tqdm>=4.67",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
