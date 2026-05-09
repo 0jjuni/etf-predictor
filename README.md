@@ -3,8 +3,8 @@ title: 한국 ETF 예측기
 emoji: 📈
 colorFrom: indigo
 colorTo: green
-sdk: streamlit
-app_file: streamlit_app.py
+sdk: docker
+app_port: 7860
 pinned: false
 ---
 

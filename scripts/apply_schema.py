@@ -41,8 +41,8 @@ def connect(use_pooler: bool):
 
 
 POOLER_HOSTS = [
-    "aws-0-ap-northeast-2.pooler.supabase.com",
     "aws-1-ap-northeast-2.pooler.supabase.com",
+    "aws-0-ap-northeast-2.pooler.supabase.com",
     "aws-0-ap-northeast-1.pooler.supabase.com",
     "aws-1-ap-northeast-1.pooler.supabase.com",
 ]

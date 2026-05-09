@@ -25,3 +25,8 @@ create policy "predictions_read_anon"
     on predictions for select
     to anon
     using (true);
+
+-- Table-level privileges. RLS only kicks in after the role passes the GRANT check;
+-- we disabled "automatically expose new tables" so we grant explicitly.
+grant usage on schema public to anon;
+grant select on public.predictions to anon;
