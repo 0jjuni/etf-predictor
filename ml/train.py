@@ -48,6 +48,7 @@ from ml.data import (
     trim_to_cutoff,
 )
 from ml.features import add_features, build_windows
+from ml.news import fetch_news
 
 log = logging.getLogger("etf.train")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -308,6 +309,8 @@ def main() -> None:
         log.info("  %s %s  prob=%.3f", p["symbol"], p["name"], p["probability"])
 
     if preds:
+        for pred in preds:
+            pred["news_json"] = fetch_news(pred["name"])
         insert_predictions(preds)
         log.info("Wrote %d predictions to Supabase", len(preds))
 

@@ -20,6 +20,11 @@ alter table predictions
     add column if not exists outcome             boolean,
     add column if not exists resolved_at         timestamptz;
 
+-- news_json: best-effort recent news for the recommended ETF, populated at
+-- training time. Schema: [{title, url, source, published}, ...] or null.
+alter table predictions
+    add column if not exists news_json jsonb;
+
 create index if not exists predictions_outcome_pending_idx
     on predictions (target_date) where outcome is null;
 
@@ -62,3 +67,11 @@ create policy "model_metrics_read_anon"
 grant usage on schema public to anon;
 grant select on public.predictions to anon;
 grant select on public.model_metrics to anon;
+
+-- service_role is used by the training job (cron) and the local backfill script
+-- to write predictions and metrics. With auto-expose disabled, service_role
+-- also needs explicit grants on each new table + sequences.
+grant usage on schema public to service_role;
+grant select, insert, update on public.predictions to service_role;
+grant select, insert, update on public.model_metrics to service_role;
+grant usage, select on all sequences in schema public to service_role;
