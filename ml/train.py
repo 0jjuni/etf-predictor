@@ -3,9 +3,9 @@
 Steps:
   1. Pull the ETF universe and per-symbol histories from FDR.
   2. Build sliding-window features and labels.
-  3. Fit XGBoost on the full set, log a held-out classification report.
-  4. Predict today's row for every ETF and keep those with prob >= threshold.
-  5. Write predictions to Supabase and persist the model artifact.
+  3. Train/test split, fit XGBoost, compute the holdout precision/recall curve.
+  4. Refit on the full set, predict today's row for every ETF.
+  5. Write predictions + model_metrics to Supabase, persist the model artifact.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import joblib
 import numpy as np
@@ -22,11 +21,12 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from xgboost import XGBClassifier
 
-from app.db import insert_predictions
+from app.db import insert_predictions, upsert_model_metrics
 from ml.config import (
     MODEL_FILENAME,
     PROB_THRESHOLD,
     RISE_THRESHOLD,
+    THRESHOLD_GRID,
     WINDOW,
     XGB_PARAMS,
 )
@@ -40,7 +40,6 @@ ARTIFACT_DIR = Path(os.environ.get("ARTIFACT_DIR", "artifacts"))
 
 
 def _target_date(now: datetime) -> str:
-    """The trading date our predictions apply to."""
     base = now if now.hour < 18 else now + timedelta(days=1)
     return base.date().isoformat()
 
@@ -58,7 +57,7 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.n
             df = fetch_history(row.Symbol)
             df = add_features(df)
             X, y, today_x = build_windows(df, rise_threshold=RISE_THRESHOLD)
-        except Exception as e:  # noqa: BLE001 — we want to skip any flaky symbol
+        except Exception as e:  # noqa: BLE001 — skip any flaky symbol
             log.warning("skip %s (%s): %s", row.Symbol, row.Name, e)
             continue
 
@@ -74,7 +73,43 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.n
     return np.vstack(X_parts), np.concatenate(y_parts), today_rows
 
 
-def train_and_report(X: np.ndarray, y: np.ndarray) -> XGBClassifier:
+def compute_threshold_curve(y_true: np.ndarray, proba: np.ndarray) -> list[dict]:
+    """Cumulative precision/recall/f1 at each threshold in THRESHOLD_GRID.
+
+    For each T: keep predictions with proba >= T, count TP/FP/FN against y_true.
+    A user reading the table can think "if the app only surfaces picks with
+    confidence >= T, this is the precision they should expect."
+    """
+    y_true = y_true.astype(bool)
+    rows: list[dict] = []
+    total_positives = int(y_true.sum())
+
+    for t in THRESHOLD_GRID:
+        pred = proba >= t
+        n_pred = int(pred.sum())
+        tp = int((pred & y_true).sum())
+        fp = n_pred - tp
+        fn = total_positives - tp
+        precision = tp / n_pred if n_pred else None
+        recall = tp / total_positives if total_positives else None
+        if precision is None or recall is None or (precision + recall) == 0:
+            f1 = None
+        else:
+            f1 = 2 * precision * recall / (precision + recall)
+        rows.append(
+            {
+                "threshold": t,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "support_total": n_pred,
+                "support_positive": tp,
+            }
+        )
+    return rows
+
+
+def split_train_evaluate(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
     log.info("Training set: %s, positive rate=%.4f", X.shape, y.mean())
 
     train_x, test_x, train_y, test_y = train_test_split(
@@ -83,31 +118,45 @@ def train_and_report(X: np.ndarray, y: np.ndarray) -> XGBClassifier:
     model = XGBClassifier(**XGB_PARAMS)
     model.fit(train_x, train_y)
 
+    proba = model.predict_proba(test_x)[:, 1]
     log.info(
         "Holdout report (threshold=0.5):\n%s",
         classification_report(test_y, model.predict(test_x)),
     )
-    proba = model.predict_proba(test_x)[:, 1]
     log.info(
         "Holdout report (threshold=%.2f):\n%s",
         PROB_THRESHOLD,
         classification_report(test_y, (proba >= PROB_THRESHOLD).astype(int)),
     )
 
-    log.info("Refitting on full dataset")
-    model.fit(X, y)
-    return model
+    curve = compute_threshold_curve(test_y, proba)
+    for row in curve:
+        prec = row["precision"]
+        log.info(
+            "  T=%.2f  prec=%s  rec=%s  support=%d",
+            row["threshold"],
+            f"{prec:.3f}" if prec is not None else "n/a",
+            f"{row['recall']:.3f}" if row["recall"] is not None else "n/a",
+            row["support_total"],
+        )
+
+    holdout = {
+        "test_size": int(len(test_y)),
+        "positive_rate": float(test_y.mean()),
+        "curve": curve,
+    }
+    return model, holdout
 
 
 def predict_today(
     model: XGBClassifier,
     today_rows: list[tuple[str, str, np.ndarray]],
+    target_date: str,
 ) -> list[dict]:
     if not today_rows:
         return []
     X_today = np.vstack([row[2] for row in today_rows])
     proba = model.predict_proba(X_today)[:, 1]
-    target_date = _target_date(datetime.now(KST))
 
     out: list[dict] = []
     for (symbol, name, _), p in zip(today_rows, proba):
@@ -134,11 +183,25 @@ def save_model(model: XGBClassifier) -> Path:
 
 
 def main() -> None:
+    target_date = _target_date(datetime.now(KST))
+    log.info("Target date: %s", target_date)
+
     X, y, today_rows = collect_dataset()
-    model = train_and_report(X, y)
+    model, holdout = split_train_evaluate(X, y)
+
+    log.info("Refitting on full dataset")
+    model.fit(X, y)
     save_model(model)
 
-    preds = predict_today(model, today_rows)
+    upsert_model_metrics(
+        target_date=target_date,
+        test_size=holdout["test_size"],
+        positive_rate=holdout["positive_rate"],
+        curve=holdout["curve"],
+    )
+    log.info("Wrote model_metrics for %s", target_date)
+
+    preds = predict_today(model, today_rows, target_date)
     log.info("Predictions above threshold: %d", len(preds))
     for p in preds[:20]:
         log.info("  %s %s  prob=%.3f", p["symbol"], p["name"], p["probability"])

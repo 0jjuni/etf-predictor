@@ -26,7 +26,27 @@ create policy "predictions_read_anon"
     to anon
     using (true);
 
+-- One row per training run, keyed by target_date. metrics_json holds the
+-- threshold curve as a JSON array: [{threshold, precision, recall, f1,
+-- support_total, support_positive}, ...]
+create table if not exists model_metrics (
+    target_date    date primary key,
+    test_size      int not null,
+    positive_rate  double precision not null,
+    metrics_json   jsonb not null,
+    created_at     timestamptz not null default now()
+);
+
+alter table model_metrics enable row level security;
+
+drop policy if exists "model_metrics_read_anon" on model_metrics;
+create policy "model_metrics_read_anon"
+    on model_metrics for select
+    to anon
+    using (true);
+
 -- Table-level privileges. RLS only kicks in after the role passes the GRANT check;
 -- we disabled "automatically expose new tables" so we grant explicitly.
 grant usage on schema public to anon;
 grant select on public.predictions to anon;
+grant select on public.model_metrics to anon;

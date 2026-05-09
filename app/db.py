@@ -17,6 +17,7 @@ from supabase import Client, create_client
 load_dotenv()
 
 PREDICTIONS_TABLE = "predictions"
+METRICS_TABLE = "model_metrics"
 
 
 def _require(name: str) -> str:
@@ -65,6 +66,37 @@ def fetch_latest_predictions(limit: int = 100) -> list[dict]:
         .execute()
     )
     return rows.data or []
+
+
+def upsert_model_metrics(
+    target_date: str,
+    test_size: int,
+    positive_rate: float,
+    curve: list[dict],
+) -> None:
+    """Write the holdout threshold curve for one training run."""
+    _client("service").table(METRICS_TABLE).upsert(
+        {
+            "target_date": target_date,
+            "test_size": int(test_size),
+            "positive_rate": float(positive_rate),
+            "metrics_json": curve,
+        },
+        on_conflict="target_date",
+    ).execute()
+
+
+def fetch_latest_model_metrics() -> dict | None:
+    """Most recent model_metrics row, or None if not populated yet."""
+    rows = (
+        _client("anon")
+        .table(METRICS_TABLE)
+        .select("*")
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return rows.data[0] if rows.data else None
 
 
 def fetch_history_for(symbol: str, limit: int = 60) -> list[dict]:
