@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -81,23 +82,34 @@ def fetch_universe_histories(
     workers = int(os.environ.get("FDR_WORKERS", max_workers))
     out: dict[str, pd.DataFrame] = {}
 
+    # FDR uses urllib/requests under the hood with no timeout — a single
+    # slow remote can wedge a worker thread forever. Set a global socket
+    # timeout for the duration of this call so any hung HTTPS connection
+    # raises and the symbol is skipped.
+    timeout_s = float(os.environ.get("FDR_TIMEOUT", "20"))
+    prev_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout_s)
+
     def _one(symbol: str, name: str) -> tuple[str, str, pd.DataFrame | None, str | None]:
         try:
             return symbol, name, fetch_history(symbol), None
         except Exception as e:  # noqa: BLE001
             return symbol, name, None, repr(e)
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = [
-            ex.submit(_one, row.Symbol, row.Name)
-            for row in universe.itertuples(index=False)
-        ]
-        for fut in tqdm(as_completed(futures), total=len(futures), desc=desc):
-            sym, name, df, err = fut.result()
-            if df is not None:
-                out[sym] = df
-            else:
-                log.warning("skip fetch %s (%s): %s", sym, name, err)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [
+                ex.submit(_one, row.Symbol, row.Name)
+                for row in universe.itertuples(index=False)
+            ]
+            for fut in tqdm(as_completed(futures), total=len(futures), desc=desc):
+                sym, name, df, err = fut.result()
+                if df is not None:
+                    out[sym] = df
+                else:
+                    log.warning("skip fetch %s (%s): %s", sym, name, err)
+    finally:
+        socket.setdefaulttimeout(prev_timeout)
 
     return out
 

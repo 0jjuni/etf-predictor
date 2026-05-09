@@ -68,6 +68,39 @@ def fetch_latest_predictions(limit: int = 100) -> list[dict]:
     return rows.data or []
 
 
+def fetch_predictions_for_latest_run(limit: int = 200) -> tuple[str | None, list[dict]]:
+    """Most recent training run's target_date + its predictions.
+
+    Predictions list is empty if the model didn't surface any picks above the
+    confidence threshold for that day — this is different from "the system
+    hasn't run yet" (target_date is None).
+
+    Authoritative source for "did we run today" is model_metrics, which is
+    written every training run regardless of pick count.
+    """
+    client = _client("anon")
+    metrics_row = (
+        client.table(METRICS_TABLE)
+        .select("target_date")
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not metrics_row.data:
+        return None, []
+    target_date = metrics_row.data[0]["target_date"]
+
+    rows = (
+        client.table(PREDICTIONS_TABLE)
+        .select("*")
+        .eq("target_date", target_date)
+        .order("probability", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return target_date, (rows.data or [])
+
+
 def upsert_model_metrics(
     target_date: str,
     test_size: int,

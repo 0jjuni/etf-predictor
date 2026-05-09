@@ -22,7 +22,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
+
+# Make `app`, `ml` importable when run as `python scripts/backfill.py`
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import pandas as pd
 
