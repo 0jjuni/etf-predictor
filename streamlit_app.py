@@ -273,9 +273,17 @@ with tab_history:
             "검증된 예측 이력이 아직 없어요. 매일 학습이 며칠 누적되거나 백필을 한 번 돌리면 채워집니다."
         )
     else:
+        first_date = hist_df["target_date"].min()
+        last_date = hist_df["target_date"].max()
+        n_days = hist_df["target_date"].nunique()
         n = len(hist_df)
         hits = int(hist_df["outcome"].sum())
         rate = (hits / n * 100) if n else 0
+
+        st.caption(
+            f"수집 기간 · {_format_korean_date(first_date)} ~ "
+            f"{_format_korean_date(last_date)}  ·  거래일 {n_days}일"
+        )
 
         c1, c2, c3 = st.columns(3)
         c1.metric("누적 추천", f"{n:,}")
