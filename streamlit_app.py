@@ -1,7 +1,7 @@
 """Streamlit entry point for HuggingFace Spaces.
 
-Reads predictions and the holdout precision curve written by the daily
-training job from Supabase. No retraining or live inference happens here.
+Reads predictions, the holdout precision curve, and resolved-outcome history
+from Supabase. No retraining or live inference happens here.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from app.db import (
     fetch_history_for,
     fetch_latest_model_metrics,
     fetch_latest_predictions,
+    fetch_resolved_history,
 )
 
 st.set_page_config(
@@ -41,13 +42,13 @@ def _history(symbol: str) -> pd.DataFrame:
     return pd.DataFrame(fetch_history_for(symbol, limit=60))
 
 
-def _precision_for_prob(prob: float, curve: list[dict]) -> float | None:
-    """Pick the highest threshold the prob crosses; return that threshold's precision.
+@st.cache_data(ttl=300)
+def _resolved_history() -> pd.DataFrame:
+    return pd.DataFrame(fetch_resolved_history(limit=500))
 
-    The curve is the cumulative precision at threshold T (precision among
-    samples with proba >= T). So a prediction with prob 0.83 belongs to the
-    band starting at T=0.80, and the precision at T=0.80 is the relevant one.
-    """
+
+def _precision_for_prob(prob: float, curve: list[dict]) -> float | None:
+    """Highest threshold the prob crosses → that threshold's precision."""
     sorted_curve = sorted(curve, key=lambda r: r["threshold"])
     thresholds = [r["threshold"] for r in sorted_curve]
     idx = bisect.bisect_right(thresholds, prob) - 1
@@ -66,9 +67,13 @@ def _curve_df(curve: list[dict]) -> pd.DataFrame:
 
 preds_df = _latest_predictions()
 metrics = _latest_metrics()
+hist_df = _resolved_history()
 
-tab_picks, tab_model = st.tabs(["오늘의 추천", "모델 정보"])
+tab_picks, tab_history, tab_model = st.tabs(["오늘의 추천", "이력", "모델 정보"])
 
+# --------------------------------------------------------------------------- #
+# Tab 1 — Today's picks
+# --------------------------------------------------------------------------- #
 with tab_picks:
     if preds_df.empty:
         st.warning("아직 저장된 예측이 없어요. 첫 학습 잡이 실행되면 표시됩니다.")
@@ -102,20 +107,83 @@ with tab_picks:
                 f"{s} {preds_df.loc[preds_df['symbol'] == s, 'name'].iloc[0]}"
             ),
         )
-        hist = _history(choice)
-        if hist.empty:
+        sym_hist = _history(choice)
+        if sym_hist.empty:
             st.info("이력이 없어요.")
         else:
-            hist["probability"] = (hist["probability"] * 100).round(2)
-            st.line_chart(hist.set_index("target_date")["probability"])
+            sym_hist["probability"] = (sym_hist["probability"] * 100).round(2)
+            st.line_chart(sym_hist.set_index("target_date")["probability"])
             st.dataframe(
-                hist[["target_date", "probability"]].rename(
+                sym_hist[["target_date", "probability"]].rename(
                     columns={"target_date": "날짜", "probability": "확률(%)"}
                 ),
                 use_container_width=True,
                 hide_index=True,
             )
 
+# --------------------------------------------------------------------------- #
+# Tab 2 — Resolved history with empirical hit rate
+# --------------------------------------------------------------------------- #
+with tab_history:
+    if hist_df.empty:
+        st.warning(
+            "해결된 예측 이력이 아직 없습니다. 백필을 돌렸거나 매일 학습이 며칠 누적되면 채워집니다."
+        )
+    else:
+        c1, c2, c3 = st.columns(3)
+        n = len(hist_df)
+        hits = int(hist_df["outcome"].sum())
+        c1.metric("누적 추천", f"{n:,}건")
+        c2.metric("적중", f"{hits:,}건")
+        c3.metric("경험적 정밀도", f"{(hits / n * 100):.1f}%" if n else "—")
+
+        st.markdown(
+            "**경험적 정밀도** — 실제로 다음 거래일에 +2.5% 이상 상승한 비율. "
+            "테스트셋 정밀도가 모델의 예상치라면, 이 값은 실제 운용 결과예요."
+        )
+
+        # Aggregate by date
+        by_date = (
+            hist_df.groupby("target_date")
+            .agg(
+                추천수=("symbol", "count"),
+                적중=("outcome", "sum"),
+                평균확률=("probability", "mean"),
+                평균실제변동=("actual_change", "mean"),
+            )
+            .sort_values("target_date", ascending=False)
+            .reset_index()
+        )
+        by_date["적중률(%)"] = (by_date["적중"] / by_date["추천수"] * 100).round(1)
+        by_date["평균확률(%)"] = (by_date["평균확률"] * 100).round(2)
+        by_date["평균실제변동(%)"] = (by_date["평균실제변동"] * 100).round(2)
+        by_date = by_date.drop(columns=["평균확률", "평균실제변동"])
+        by_date.columns = ["날짜", "추천수", "적중", "적중률(%)", "평균확률(%)", "평균실제변동(%)"]
+
+        st.subheader("날짜별 요약")
+        st.dataframe(by_date, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("추천 종목 상세 (최근 순)")
+        detail = hist_df[
+            [
+                "target_date",
+                "symbol",
+                "name",
+                "probability",
+                "actual_change",
+                "outcome",
+            ]
+        ].copy()
+        detail["probability"] = (detail["probability"] * 100).round(2)
+        detail["actual_change"] = (detail["actual_change"] * 100).round(2)
+        detail["outcome"] = detail["outcome"].map({True: "✓ 적중", False: "✗ 실패"})
+        detail.columns = ["날짜", "종목코드", "종목명", "예측확률(%)", "실제변동(%)", "결과"]
+        st.dataframe(detail, use_container_width=True, hide_index=True)
+
+# --------------------------------------------------------------------------- #
+# Tab 3 — Model card
+# --------------------------------------------------------------------------- #
 with tab_model:
     if metrics is None:
         st.warning("모델 메트릭이 아직 없습니다. 학습이 한 번 이상 완료되어야 합니다.")

@@ -30,3 +30,27 @@ def fetch_history(symbol: str, *, now: datetime | None = None) -> pd.DataFrame:
     if now.hour < 18:
         df = df.iloc[:-1]
     return df
+
+
+def trim_to_cutoff(df: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
+    """Return rows strictly before `cutoff` (exclusive). cutoff should already be
+    timezone-naive at midnight; FDR's index is also naive daily."""
+    return df.loc[df.index < cutoff]
+
+
+def closes_around(df: pd.DataFrame, target: pd.Timestamp) -> tuple[float, float] | None:
+    """Look up close[target] and the previous trading day's close.
+
+    Returns None if target isn't in the index, or if there is no prior row.
+    """
+    if target not in df.index:
+        return None
+    target_pos = df.index.get_loc(target)
+    if target_pos == 0:
+        return None
+    return float(df["Close"].iloc[target_pos - 1]), float(df["Close"].iloc[target_pos])
+
+
+def recent_trading_dates(df: pd.DataFrame, n: int) -> list[pd.Timestamp]:
+    """The last n trading dates from a reference history (most recent first)."""
+    return list(df.index[-n:][::-1])

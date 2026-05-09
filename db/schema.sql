@@ -11,6 +11,18 @@ create table if not exists predictions (
     unique (target_date, symbol)
 );
 
+-- Outcome columns are filled in by a later run once close[target_date] is known.
+-- A null outcome means the prediction is still pending resolution.
+alter table predictions
+    add column if not exists actual_close_prev   double precision,
+    add column if not exists actual_close_target double precision,
+    add column if not exists actual_change       double precision,
+    add column if not exists outcome             boolean,
+    add column if not exists resolved_at         timestamptz;
+
+create index if not exists predictions_outcome_pending_idx
+    on predictions (target_date) where outcome is null;
+
 create index if not exists predictions_target_date_idx
     on predictions (target_date desc);
 

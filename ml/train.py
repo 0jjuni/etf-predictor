@@ -1,11 +1,15 @@
-"""Daily training entry point. Run once per day before market open.
+"""Daily training entry point + reusable building blocks for backfill.
 
-Steps:
-  1. Pull the ETF universe and per-symbol histories from FDR.
-  2. Build sliding-window features and labels.
+Live flow (`python -m ml.train`):
+  1. Fetch ETF universe and per-symbol histories from FDR.
+  2. Build sliding-window features and labels using all available history.
   3. Train/test split, fit XGBoost, compute the holdout precision/recall curve.
-  4. Refit on the full set, predict today's row for every ETF.
+  4. Refit on full data, predict today's row for every ETF.
   5. Write predictions + model_metrics to Supabase, persist the model artifact.
+  6. Resolve any past predictions whose target_date close is now known.
+
+The reusable functions are also called from `scripts/backfill.py` to walk
+the model forward through historical dates one at a time.
 """
 from __future__ import annotations
 
@@ -16,12 +20,18 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from xgboost import XGBClassifier
 
-from app.db import insert_predictions, upsert_model_metrics
+from app.db import (
+    fetch_pending_outcomes,
+    insert_predictions,
+    update_prediction_outcome,
+    upsert_model_metrics,
+)
 from ml.config import (
     MODEL_FILENAME,
     PROB_THRESHOLD,
@@ -30,7 +40,13 @@ from ml.config import (
     WINDOW,
     XGB_PARAMS,
 )
-from ml.data import KST, fetch_etf_universe, fetch_history
+from ml.data import (
+    KST,
+    closes_around,
+    fetch_etf_universe,
+    fetch_history,
+    trim_to_cutoff,
+)
 from ml.features import add_features, build_windows
 
 log = logging.getLogger("etf.train")
@@ -39,26 +55,60 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 ARTIFACT_DIR = Path(os.environ.get("ARTIFACT_DIR", "artifacts"))
 
 
-def _target_date(now: datetime) -> str:
+def _target_date_str(now: datetime) -> str:
     base = now if now.hour < 18 else now + timedelta(days=1)
     return base.date().isoformat()
 
 
-def collect_dataset() -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.ndarray]]]:
-    universe = fetch_etf_universe()
-    log.info("ETF universe: %d symbols", len(universe))
+# --------------------------------------------------------------------------- #
+# Reusable building blocks
+# --------------------------------------------------------------------------- #
 
+def fetch_universe_histories(
+    universe: pd.DataFrame,
+    *,
+    desc: str = "fetch",
+) -> dict[str, pd.DataFrame]:
+    """Fetch FDR history for every symbol once. Skips symbols that error out.
+
+    Returns a dict keyed by Symbol. The DataFrames are the raw FDR output
+    (no early-hours trimming) — callers apply cutoffs themselves.
+    """
+    out: dict[str, pd.DataFrame] = {}
+    for row in tqdm(universe.itertuples(index=False), total=len(universe), desc=desc):
+        try:
+            out[row.Symbol] = fetch_history(row.Symbol)
+        except Exception as e:  # noqa: BLE001
+            log.warning("skip fetch %s (%s): %s", row.Symbol, row.Name, e)
+    return out
+
+
+def build_dataset(
+    histories: dict[str, pd.DataFrame],
+    universe: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.ndarray]]]:
+    """Sliding-window features over the universe.
+
+    If `cutoff` is given, every history is first trimmed to rows strictly
+    before that timestamp — used by backfill to prevent target-date leakage.
+    """
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
     today_rows: list[tuple[str, str, np.ndarray]] = []
 
-    for row in tqdm(universe.itertuples(index=False), total=len(universe), desc="fetch"):
+    for row in universe.itertuples(index=False):
+        df = histories.get(row.Symbol)
+        if df is None:
+            continue
         try:
-            df = fetch_history(row.Symbol)
+            if cutoff is not None:
+                df = trim_to_cutoff(df, cutoff)
             df = add_features(df)
             X, y, today_x = build_windows(df, rise_threshold=RISE_THRESHOLD)
-        except Exception as e:  # noqa: BLE001 — skip any flaky symbol
-            log.warning("skip %s (%s): %s", row.Symbol, row.Name, e)
+        except Exception as e:  # noqa: BLE001
+            log.warning("skip build %s (%s): %s", row.Symbol, row.Name, e)
             continue
 
         if len(X) > 0:
@@ -74,12 +124,7 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.n
 
 
 def compute_threshold_curve(y_true: np.ndarray, proba: np.ndarray) -> list[dict]:
-    """Cumulative precision/recall/f1 at each threshold in THRESHOLD_GRID.
-
-    For each T: keep predictions with proba >= T, count TP/FP/FN against y_true.
-    A user reading the table can think "if the app only surfaces picks with
-    confidence >= T, this is the precision they should expect."
-    """
+    """Cumulative precision/recall/f1 at each threshold in THRESHOLD_GRID."""
     y_true = y_true.astype(bool)
     rows: list[dict] = []
     total_positives = int(y_true.sum())
@@ -109,7 +154,11 @@ def compute_threshold_curve(y_true: np.ndarray, proba: np.ndarray) -> list[dict]
     return rows
 
 
-def split_train_evaluate(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
+def train_model(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
+    """Train on 80% of (X, y), report on the holdout, then refit on full data.
+
+    Returns (model fit on full X/y, holdout dict with curve + summary stats).
+    """
     log.info("Training set: %s, positive rate=%.4f", X.shape, y.mean())
 
     train_x, test_x, train_y, test_y = train_test_split(
@@ -130,29 +179,23 @@ def split_train_evaluate(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, d
     )
 
     curve = compute_threshold_curve(test_y, proba)
-    for row in curve:
-        prec = row["precision"]
-        log.info(
-            "  T=%.2f  prec=%s  rec=%s  support=%d",
-            row["threshold"],
-            f"{prec:.3f}" if prec is not None else "n/a",
-            f"{row['recall']:.3f}" if row["recall"] is not None else "n/a",
-            row["support_total"],
-        )
 
-    holdout = {
+    log.info("Refitting on full dataset")
+    model.fit(X, y)
+
+    return model, {
         "test_size": int(len(test_y)),
         "positive_rate": float(test_y.mean()),
         "curve": curve,
     }
-    return model, holdout
 
 
-def predict_today(
+def make_predictions(
     model: XGBClassifier,
     today_rows: list[tuple[str, str, np.ndarray]],
     target_date: str,
 ) -> list[dict]:
+    """Filter ETFs whose probability clears PROB_THRESHOLD and shape DB rows."""
     if not today_rows:
         return []
     X_today = np.vstack([row[2] for row in today_rows])
@@ -174,6 +217,60 @@ def predict_today(
     return out
 
 
+def attach_outcomes(
+    predictions: list[dict],
+    histories: dict[str, pd.DataFrame],
+    target_date: str,
+) -> list[dict]:
+    """If close[target_date] is already in histories, fill outcome columns
+    on each prediction in place. Returns the same list for chaining."""
+    target = pd.Timestamp(target_date)
+    for row in predictions:
+        df = histories.get(row["symbol"])
+        if df is None:
+            continue
+        cd = closes_around(df, target)
+        if cd is None:
+            continue
+        prev_close, target_close = cd
+        change = target_close / prev_close - 1
+        row["actual_close_prev"] = prev_close
+        row["actual_close_target"] = target_close
+        row["actual_change"] = float(change)
+        row["outcome"] = bool(change >= row["rise_threshold"] - 1)
+        row["resolved_at"] = datetime.now(KST).isoformat()
+    return predictions
+
+
+def resolve_pending(histories: dict[str, pd.DataFrame]) -> int:
+    """Fill outcome columns on any predictions where outcome is still null
+    and we now have close[target_date]. Returns the number resolved."""
+    pending = fetch_pending_outcomes()
+    if not pending:
+        return 0
+
+    resolved = 0
+    for row in pending:
+        df = histories.get(row["symbol"])
+        if df is None:
+            continue
+        cd = closes_around(df, pd.Timestamp(row["target_date"]))
+        if cd is None:
+            continue
+        prev_close, target_close = cd
+        change = target_close / prev_close - 1
+        update_prediction_outcome(
+            prediction_id=row["id"],
+            actual_close_prev=prev_close,
+            actual_close_target=target_close,
+            actual_change=float(change),
+            outcome=bool(change >= row["rise_threshold"] - 1),
+        )
+        resolved += 1
+    log.info("Resolved %d/%d pending outcomes", resolved, len(pending))
+    return resolved
+
+
 def save_model(model: XGBClassifier) -> Path:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     path = ARTIFACT_DIR / MODEL_FILENAME
@@ -182,15 +279,20 @@ def save_model(model: XGBClassifier) -> Path:
     return path
 
 
+# --------------------------------------------------------------------------- #
+# Daily entry point
+# --------------------------------------------------------------------------- #
+
 def main() -> None:
-    target_date = _target_date(datetime.now(KST))
+    target_date = _target_date_str(datetime.now(KST))
     log.info("Target date: %s", target_date)
 
-    X, y, today_rows = collect_dataset()
-    model, holdout = split_train_evaluate(X, y)
+    universe = fetch_etf_universe()
+    log.info("ETF universe: %d symbols", len(universe))
+    histories = fetch_universe_histories(universe)
 
-    log.info("Refitting on full dataset")
-    model.fit(X, y)
+    X, y, today_rows = build_dataset(histories, universe)
+    model, holdout = train_model(X, y)
     save_model(model)
 
     upsert_model_metrics(
@@ -199,9 +301,8 @@ def main() -> None:
         positive_rate=holdout["positive_rate"],
         curve=holdout["curve"],
     )
-    log.info("Wrote model_metrics for %s", target_date)
 
-    preds = predict_today(model, today_rows, target_date)
+    preds = make_predictions(model, today_rows, target_date)
     log.info("Predictions above threshold: %d", len(preds))
     for p in preds[:20]:
         log.info("  %s %s  prob=%.3f", p["symbol"], p["name"], p["probability"])
@@ -209,8 +310,8 @@ def main() -> None:
     if preds:
         insert_predictions(preds)
         log.info("Wrote %d predictions to Supabase", len(preds))
-    else:
-        log.info("No predictions above threshold; nothing written")
+
+    resolve_pending(histories)
 
 
 if __name__ == "__main__":

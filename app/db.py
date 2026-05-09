@@ -110,3 +110,53 @@ def fetch_history_for(symbol: str, limit: int = 60) -> list[dict]:
         .execute()
     )
     return rows.data or []
+
+
+def fetch_pending_outcomes() -> list[dict]:
+    """Predictions whose outcome column hasn't been filled in yet."""
+    rows = (
+        _client("service")
+        .table(PREDICTIONS_TABLE)
+        .select("id,target_date,symbol,rise_threshold")
+        .is_("outcome", "null")
+        .order("target_date")
+        .execute()
+    )
+    return rows.data or []
+
+
+def update_prediction_outcome(
+    *,
+    prediction_id: int,
+    actual_close_prev: float,
+    actual_close_target: float,
+    actual_change: float,
+    outcome: bool,
+) -> None:
+    """Fill outcome columns on a single prediction row by primary key."""
+    from datetime import datetime, timezone
+
+    _client("service").table(PREDICTIONS_TABLE).update(
+        {
+            "actual_close_prev": float(actual_close_prev),
+            "actual_close_target": float(actual_close_target),
+            "actual_change": float(actual_change),
+            "outcome": bool(outcome),
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("id", prediction_id).execute()
+
+
+def fetch_resolved_history(limit: int = 500) -> list[dict]:
+    """Past predictions whose outcomes are already known. UI history tab."""
+    rows = (
+        _client("anon")
+        .table(PREDICTIONS_TABLE)
+        .select("*")
+        .not_.is_("outcome", "null")
+        .order("target_date", desc=True)
+        .order("probability", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return rows.data or []
