@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { fetchResolvedHistory } from "@/lib/queries";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EquityCurve } from "../_components/EquityCurve";
 
 export const revalidate = 300;
@@ -15,16 +17,17 @@ export default async function BacktestPage() {
 
   return (
     <div className="space-y-6">
-      <nav className="text-xs text-slate-500">
-        <Link href="/" className="hover:underline">
+      <nav className="flex items-center gap-1 text-xs text-slate-500">
+        <Link href="/" className="hover:text-indigo-600">
           홈
-        </Link>{" "}
-        / 수익률 시뮬레이션
+        </Link>
+        <ChevronRight className="h-3 w-3" />
+        <span className="text-slate-700">수익률 시뮬레이션</span>
       </nav>
 
-      <header className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h1 className="text-2xl font-bold">추천대로 샀다면?</h1>
-        <p className="mt-2 text-sm text-slate-600">
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">추천대로 샀다면?</h1>
+        <p className="mt-1 max-w-2xl text-sm text-slate-500">
           매일 모델이 추천한 종목을 동일 비중으로 매수해 다음 거래일 종가에
           매도했다고 가정한 누적 자산 가치 곡선입니다. 추천이 없는 날에는 현금
           보유(수익 0%)로 가정. 거래비용·세금 미반영.
@@ -32,19 +35,21 @@ export default async function BacktestPage() {
       </header>
 
       {history.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
-          <p className="text-sm font-semibold text-slate-700">
-            검증 가능한 기록이 아직 없습니다.
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            매일 학습이 누적되거나 백필을 한 번 돌리면 채워집니다. 정밀도 우선
-            설계상 추천 자체가 드물 수 있어요.
-          </p>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>검증 가능한 기록이 아직 없습니다</CardTitle>
+            <CardDescription>
+              매일 학습이 누적되거나 백필을 한 번 돌리면 채워집니다. 정밀도 우선
+              설계상 추천 자체가 드물 수 있어요.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       ) : (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <EquityCurve history={history} />
-        </section>
+        <Card>
+          <CardContent className="pt-5">
+            <EquityCurve history={history} />
+          </CardContent>
+        </Card>
       )}
     </div>
   );

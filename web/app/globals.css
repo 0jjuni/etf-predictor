@@ -1,10 +1,71 @@
 @import "tailwindcss";
 
+@import "@fontsource/pretendard/300.css";
+@import "@fontsource/pretendard/400.css";
+@import "@fontsource/pretendard/500.css";
+@import "@fontsource/pretendard/600.css";
+@import "@fontsource/pretendard/700.css";
+@import "@fontsource/pretendard/800.css";
+
 @theme inline {
-  --font-sans: var(--font-sans);
+  --font-sans:
+    "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "tnum";
+  letter-spacing: -0.011em;
 }
 
 body {
-  font-family: var(--font-sans), Pretendard, "Apple SD Gothic Neo", "Malgun Gothic",
-    sans-serif;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: #0f172a;
+  background: #fafafa;
+}
+
+/* Tabular numbers for any element with `tabular-nums` className handled by Tailwind. */
+
+/* prose-* used on /about, /disclaimer, /privacy */
+.prose h1 {
+  font-size: 1.875rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.5rem;
+  color: #0f172a;
+}
+.prose h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  color: #0f172a;
+}
+.prose p,
+.prose li {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: #334155;
+}
+.prose ul {
+  margin-top: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.prose li {
+  margin-bottom: 0.4rem;
+}
+.prose a {
+  color: #4f46e5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose strong {
+  color: #0f172a;
+  font-weight: 600;
 }
