@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY streamlit_app.py .
 COPY app/ ./app/
+COPY ml/ ./ml/
 
 # HF Spaces routes traffic to port 7860 by default.
 EXPOSE 7860
