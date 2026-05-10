@@ -14,9 +14,11 @@ import streamlit as st
 from app.db import (
     fetch_history_for,
     fetch_latest_model_metrics,
+    fetch_latest_universe_with_probabilities,
     fetch_predictions_for_latest_run,
     fetch_resolved_history,
 )
+from ml.news import fetch_news
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -288,6 +290,21 @@ def _resolved_history() -> pd.DataFrame:
     return pd.DataFrame(fetch_resolved_history(limit=500))
 
 
+@st.cache_data(ttl=600)
+def _full_universe() -> tuple[str | None, pd.DataFrame]:
+    target_date, rows = fetch_latest_universe_with_probabilities()
+    if not rows:
+        return target_date, pd.DataFrame()
+    df = pd.DataFrame(rows).sort_values("probability", ascending=False).reset_index(drop=True)
+    df["rank"] = df.index + 1
+    return target_date, df
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _live_news(name: str) -> list[dict]:
+    return fetch_news(name)
+
+
 def _precision_for_prob(prob: float, curve: list[dict]) -> float | None:
     sorted_curve = sorted(curve, key=lambda r: r["threshold"])
     thresholds = [r["threshold"] for r in sorted_curve]
@@ -309,7 +326,9 @@ target_date, preds_df = _latest_run()
 metrics = _latest_metrics()
 hist_df = _resolved_history()
 
-tab_picks, tab_history, tab_model = st.tabs(["추천 종목", "검증 기록", "모델 정보"])
+tab_picks, tab_history, tab_browse, tab_model = st.tabs(
+    ["추천 종목", "검증 기록", "종목 둘러보기", "모델 정보"]
+)
 
 # --------------------------------------------------------------------------- #
 # Tab 1 — Today's picks
@@ -527,7 +546,61 @@ with tab_history:
         st.dataframe(detail, use_container_width=True, hide_index=True)
 
 # --------------------------------------------------------------------------- #
-# Tab 3 — Model card (friendly first, technical details below)
+# Tab 3 — Browse all ETFs with search + probability + live news
+# --------------------------------------------------------------------------- #
+with tab_browse:
+    universe_date, universe_df = _full_universe()
+    if universe_df.empty:
+        st.info(
+            "아직 ETF 확률 데이터가 적재되지 않았습니다. "
+            "다음 학습이 완료되면 모든 한국 ETF를 검색할 수 있어요."
+        )
+    else:
+        st.markdown(
+            f"<span class='date-pill'>기준 {_format_korean_date(universe_date)}</span>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"전체 ETF {len(universe_df):,}개의 모델 추정 확률을 검색할 수 있어요. "
+            "확률이 70% 미만이어도 모델이 어떻게 보고 있는지 확인 가능합니다."
+        )
+
+        options = [
+            f"{row['symbol']}  {row['name']}"
+            for _, row in universe_df.iterrows()
+        ]
+        choice_label = st.selectbox(
+            "ETF 검색",
+            options=options,
+            index=0,
+            placeholder="종목명 또는 코드로 검색...",
+        )
+        if choice_label:
+            selected_symbol = choice_label.split()[0]
+            row = universe_df[universe_df["symbol"] == selected_symbol].iloc[0]
+            prob_pct = float(row["probability"]) * 100
+            rank = int(row["rank"])
+            total = len(universe_df)
+            recommended = prob_pct >= 70
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("상승 확률", f"{prob_pct:.1f}%")
+            c2.metric("전체 순위", f"{rank} / {total}")
+            c3.metric(
+                "추천 여부",
+                "추천 종목" if recommended else "기준 미달",
+                help="확률 70% 이상이면 추천 종목 탭에 노출됩니다.",
+            )
+
+            st.divider()
+            st.subheader("관련 기사")
+            with st.spinner("최신 기사 불러오는 중..."):
+                articles = _live_news(row["name"])
+            st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# Tab 4 — Model card (friendly first, technical details below)
 # --------------------------------------------------------------------------- #
 with tab_model:
     st.subheader("한 줄 요약")

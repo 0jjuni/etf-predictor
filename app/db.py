@@ -18,6 +18,7 @@ load_dotenv()
 
 PREDICTIONS_TABLE = "predictions"
 METRICS_TABLE = "model_metrics"
+DAILY_PROB_TABLE = "daily_probabilities"
 
 
 def _require(name: str) -> str:
@@ -181,6 +182,47 @@ def update_prediction_outcome(
             "resolved_at": datetime.now(timezone.utc).isoformat(),
         }
     ).eq("id", prediction_id).execute()
+
+
+def upsert_daily_probabilities(rows: list[dict]) -> None:
+    """Upsert per-day probability for every ETF in the universe.
+
+    901 rows × 1 POST is fine but Supabase has body size limits, so chunk to
+    500 rows per request to stay comfortably under any boundary.
+    """
+    if not rows:
+        return
+    client = _client("service")
+    chunk_size = 500
+    for i in range(0, len(rows), chunk_size):
+        client.table(DAILY_PROB_TABLE).upsert(
+            rows[i : i + chunk_size],
+            on_conflict="target_date,symbol",
+        ).execute()
+
+
+def fetch_latest_universe_with_probabilities() -> tuple[str | None, list[dict]]:
+    """Most recent target_date in daily_probabilities + every ETF row for that date.
+    Returns (None, []) if the table hasn't been populated yet."""
+    client = _client("anon")
+    latest = (
+        client.table(DAILY_PROB_TABLE)
+        .select("target_date")
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not latest.data:
+        return None, []
+    target_date = latest.data[0]["target_date"]
+    rows = (
+        client.table(DAILY_PROB_TABLE)
+        .select("symbol,name,probability")
+        .eq("target_date", target_date)
+        .order("probability", desc=True)
+        .execute()
+    )
+    return target_date, (rows.data or [])
 
 
 def fetch_resolved_history(limit: int = 500) -> list[dict]:

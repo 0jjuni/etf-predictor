@@ -75,10 +75,35 @@ grant usage on schema public to anon;
 grant select on public.predictions to anon;
 grant select on public.model_metrics to anon;
 
+-- daily_probabilities: per-day probability for EVERY ETF in the universe.
+-- Used by the "종목 둘러보기" tab so visitors can look up any ETF's current
+-- model probability, not just the ones above the recommendation threshold.
+create table if not exists daily_probabilities (
+    target_date date not null,
+    symbol      text not null,
+    name        text not null,
+    probability double precision not null,
+    primary key (target_date, symbol)
+);
+
+create index if not exists daily_prob_target_idx
+    on daily_probabilities (target_date desc);
+create index if not exists daily_prob_symbol_idx
+    on daily_probabilities (symbol);
+
+alter table daily_probabilities enable row level security;
+drop policy if exists "daily_prob_read_anon" on daily_probabilities;
+create policy "daily_prob_read_anon"
+    on daily_probabilities for select
+    to anon
+    using (true);
+
 -- service_role is used by the training job (cron) and the local backfill script
 -- to write predictions and metrics. With auto-expose disabled, service_role
 -- also needs explicit grants on each new table + sequences.
 grant usage on schema public to service_role;
 grant select, insert, update on public.predictions to service_role;
 grant select, insert, update on public.model_metrics to service_role;
+grant select, insert, update on public.daily_probabilities to service_role;
+grant select on public.daily_probabilities to anon;
 grant usage, select on all sequences in schema public to service_role;

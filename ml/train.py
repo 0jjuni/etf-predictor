@@ -32,6 +32,7 @@ from app.db import (
     fetch_pending_outcomes,
     insert_predictions,
     update_prediction_outcome,
+    upsert_daily_probabilities,
     upsert_model_metrics,
 )
 from ml.config import (
@@ -256,6 +257,27 @@ def make_predictions(
     return out
 
 
+def compute_all_probabilities(
+    model: XGBClassifier,
+    today_rows: list[tuple[str, str, np.ndarray]],
+    target_date: str,
+) -> list[dict]:
+    """Probability for EVERY ETF — used by the browse-all-ETFs UI tab."""
+    if not today_rows:
+        return []
+    X_today = np.vstack([row[2] for row in today_rows])
+    proba = model.predict_proba(X_today)[:, 1]
+    return [
+        {
+            "target_date": target_date,
+            "symbol": symbol,
+            "name": name,
+            "probability": float(p),
+        }
+        for (symbol, name, _), p in zip(today_rows, proba)
+    ]
+
+
 def _precision_at_band(prob: float, curve: list[dict]) -> float | None:
     """Highest threshold the prob crosses; return its precision (None if below grid)."""
     sorted_curve = sorted(curve, key=lambda r: r["threshold"])
@@ -398,6 +420,10 @@ def main() -> None:
     X, y, today_rows = build_dataset(histories, universe)
     model, holdout = train_model(X, y)
     save_model(model)
+
+    all_proba = compute_all_probabilities(model, today_rows, target_date)
+    upsert_daily_probabilities(all_proba)
+    log.info("Wrote %d daily_probabilities rows", len(all_proba))
 
     preds = make_predictions(model, today_rows, target_date)
     log.info("Predictions above threshold: %d", len(preds))

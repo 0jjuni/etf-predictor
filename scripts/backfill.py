@@ -32,11 +32,12 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
-from app.db import insert_predictions, upsert_model_metrics
+from app.db import insert_predictions, upsert_daily_probabilities, upsert_model_metrics
 from ml.data import fetch_etf_universe, recent_trading_dates
 from ml.train import (
     attach_outcomes,
     build_dataset,
+    compute_all_probabilities,
     compute_fallback_picks,
     fetch_universe_histories,
     make_predictions,
@@ -81,6 +82,10 @@ def main() -> None:
         log.info("  dataset: %s, positive rate=%.4f", X.shape, y.mean())
 
         model, holdout = train_model(X, y)
+
+        all_proba = compute_all_probabilities(model, today_rows, target_str)
+        upsert_daily_probabilities(all_proba)
+        log.info("  daily_probabilities written: %d", len(all_proba))
 
         preds = make_predictions(model, today_rows, target_str)
         attach_outcomes(preds, histories, target_str)
