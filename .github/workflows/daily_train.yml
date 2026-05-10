@@ -6,6 +6,10 @@ on:
     - cron: "0 23 * * *"
   workflow_dispatch: {}
 
+# The post-generation step needs write access to commit MDX files back.
+permissions:
+  contents: write
+
 jobs:
   train:
     runs-on: ubuntu-latest
@@ -13,10 +17,16 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      LLM_PROVIDER: gemini
       XGB_DEVICE: cpu
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full token so the post-commit step can push back to the repo.
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: astral-sh/setup-uv@v3
         with:
@@ -27,6 +37,26 @@ jobs:
 
       - name: Train + predict + write to Supabase
         run: uv run python -m ml.train
+
+      - name: Generate daily post (best-effort)
+        # Don't fail the whole workflow if Gemini is rate-limited or the key
+        # is missing; the model run is the critical path.
+        continue-on-error: true
+        if: env.GEMINI_API_KEY != ''
+        run: uv run python scripts/generate_post.py
+
+      - name: Commit + push generated post
+        # Only commit when a new post file was actually written.
+        run: |
+          git config user.name "etf-predictor-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add web/content/posts/ || true
+          if ! git diff --cached --quiet; then
+            git commit -m "post: $(date -u +%Y-%m-%d) daily analysis"
+            git push
+          else
+            echo "No new post to commit"
+          fi
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4

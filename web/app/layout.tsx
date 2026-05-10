@@ -75,6 +75,7 @@ function Header() {
         <div className="flex items-center gap-1">
           <ul className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-300">
             <NavLink href="/today" label="오늘" />
+            <NavLink href="/blog" label="분석" />
             <NavLink href="/backtest" label="백테스트" />
             <NavLink href="/model" label="모델" />
           </ul>
