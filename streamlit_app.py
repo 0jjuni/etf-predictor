@@ -312,6 +312,42 @@ def _resolved_history() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600)
+def _kospi_benchmark(start: str, end: str) -> pd.DataFrame:
+    """KODEX 200 (069500) daily close, normalized to 100 at start."""
+    import FinanceDataReader as fdr
+
+    try:
+        df = fdr.DataReader("069500", start, end)
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
+    idx = pd.to_datetime(df.index)
+    out = pd.DataFrame(
+        {
+            "target_date": idx.strftime("%Y-%m-%d"),
+            "kospi200": 100 * df["Close"].to_numpy() / float(df["Close"].iloc[0]),
+        }
+    )
+    return out.reset_index(drop=True)
+
+
+def _compute_equity_curve(hist_df: pd.DataFrame) -> pd.DataFrame:
+    """Daily equity assuming equal-weight buy of all picks at prev close,
+    sell at target_date close. No-pick days = cash (return 0)."""
+    if hist_df.empty:
+        return pd.DataFrame()
+    daily = (
+        hist_df.groupby("target_date")
+        .agg(daily_return=("actual_change", "mean"), n_picks=("symbol", "count"))
+        .sort_index()
+        .reset_index()
+    )
+    daily["equity"] = 100 * (1 + daily["daily_return"]).cumprod()
+    return daily
+
+
+@st.cache_data(ttl=600)
 def _full_universe() -> tuple[str | None, pd.DataFrame]:
     target_date, rows = fetch_latest_universe_with_probabilities()
     if not rows:
@@ -521,6 +557,52 @@ with tab_history:
             f"수집 기간 · {_format_korean_date(first_date)} ~ "
             f"{_format_korean_date(last_date)}  ·  거래일 {n_days}일"
         )
+
+        # ---- Simulation: "추천대로 샀다면?" ----
+        equity = _compute_equity_curve(hist_df)
+        if not equity.empty:
+            final_equity = float(equity["equity"].iloc[-1])
+            total_return_pct = final_equity - 100
+            traded_days = len(equity)
+            avg_per_trade_pct = float(equity["daily_return"].mean()) * 100
+
+            st.subheader("추천대로 샀다면?")
+            st.caption(
+                "매일 추천된 종목을 동일 비중으로 매수 → 다음 거래일 종가에 매도. "
+                "모델이 추천이 없는 날에는 현금 보유(수익 0%)로 가정. 거래비용/세금 미반영."
+            )
+
+            sm1, sm2, sm3 = st.columns(3)
+            sm1.metric(
+                "누적 수익률",
+                f"{total_return_pct:+.2f}%",
+                help="시작 자본 100을 기준으로 한 현재 자산 가치 변화",
+            )
+            sm2.metric("거래일 수", f"{traded_days}일")
+            sm3.metric("거래일 평균 수익", f"{avg_per_trade_pct:+.2f}%")
+
+            # Equity curve + KOSPI 200 benchmark
+            bench = _kospi_benchmark(first_date, last_date)
+            chart_df = equity[["target_date", "equity"]].copy()
+            chart_df = chart_df.rename(columns={"equity": "모델"})
+            if not bench.empty:
+                chart_df = chart_df.merge(bench, on="target_date", how="outer").sort_values(
+                    "target_date"
+                )
+                chart_df = chart_df.rename(columns={"kospi200": "KOSPI 200"})
+                # forward-fill model equity for days where no trade happened so the
+                # line stays flat instead of dropping out of the chart.
+                chart_df["모델"] = chart_df["모델"].ffill().fillna(100.0)
+            st.line_chart(
+                chart_df.set_index("target_date"),
+                height=280,
+                use_container_width=True,
+            )
+            st.caption(
+                "기준선 100. 차트는 누적 자산 가치(equity curve). "
+                "회색이 KODEX 200(069500) 동일 기간 buy-and-hold."
+            )
+            st.divider()
 
         c1, c2, c3 = st.columns(3)
         c1.metric("누적 추천", f"{n:,}")
