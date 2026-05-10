@@ -24,7 +24,17 @@ FEATURE_COLS: tuple[str, ...] = (
     "Vol_ratio",
     "SMA5_ratio",
     "SMA20_ratio",
-    "Market_change",
+    "Market_KR",
+    "Market_US500",
+    "Market_NASDAQ",
+    "Market_USDKRW",
+)
+
+MARKET_COLS: tuple[str, ...] = (
+    "Market_KR",
+    "Market_US500",
+    "Market_NASDAQ",
+    "Market_USDKRW",
 )
 
 
@@ -40,11 +50,15 @@ def add_rsi(df: pd.DataFrame, period: int = RSI_PERIOD) -> pd.DataFrame:
 
 
 def _macd_hist(close: pd.Series) -> pd.Series:
+    """MACD histogram normalized by close so it's comparable across ETFs at
+    different price levels (a 500-won histogram on a 100k ETF means very
+    different from a 500-won histogram on a 5k ETF)."""
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
     signal = macd.ewm(span=9, adjust=False).mean()
-    return macd - signal
+    hist = macd - signal
+    return (hist / close.replace(0, np.nan)).fillna(0.0)
 
 
 def _bollinger(close: pd.Series, period: int = 20, k: float = 2.0):
@@ -95,17 +109,22 @@ def _volume_ratio(df: pd.DataFrame, period: int = 20) -> pd.Series:
 def add_features(
     df: pd.DataFrame,
     *,
-    market: pd.Series | None = None,
+    market: pd.Series | pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Compute all feature columns and drop rows with any NaN.
 
-    `market` is an optional Series indexed by date with the same `Date` index
-    type as `df`, holding the daily return of a market benchmark (e.g. KODEX
-    200). Joined by index; missing dates filled with 0.
+    `market` may be either:
+      - DataFrame with columns from MARKET_COLS (preferred)
+      - Series of daily returns (legacy: treated as Market_KR for
+        backwards compatibility)
+      - None
+    Missing market dates and missing columns are filled with 0.
     """
     df = df.copy()
     df = add_rsi(df)
-    df["Momentum"] = df["Close"].diff(periods=MOMENTUM_PERIOD)
+    # Percent-change momentum (was raw price diff before — different ETFs at
+    # different price levels were not comparable).
+    df["Momentum"] = df["Close"].pct_change(periods=MOMENTUM_PERIOD).fillna(0.0)
     df["MACD_hist"] = _macd_hist(df["Close"])
     pct_b, bw, sma20 = _bollinger(df["Close"])
     df["BB_pctB"] = pct_b
@@ -117,10 +136,20 @@ def add_features(
     df["SMA5_ratio"] = (df["Close"] / sma5 - 1).fillna(0.0)
     df["SMA20_ratio"] = (df["Close"] / sma20 - 1).fillna(0.0)
 
-    if market is not None:
-        df["Market_change"] = market.reindex(df.index).fillna(0.0).astype(float)
-    else:
-        df["Market_change"] = 0.0
+    # Broadcast market columns (zero-fill anything missing).
+    market_df: pd.DataFrame | None = None
+    if isinstance(market, pd.Series):
+        market_df = market.to_frame(name="Market_KR")
+    elif isinstance(market, pd.DataFrame):
+        market_df = market
+
+    for col in MARKET_COLS:
+        if market_df is not None and col in market_df.columns:
+            df[col] = (
+                market_df[col].reindex(df.index).fillna(0.0).astype(float)
+            )
+        else:
+            df[col] = 0.0
 
     needed = ["Close", *FEATURE_COLS]
     return df[needed].dropna()

@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from app.db import insert_predictions, upsert_daily_probabilities, upsert_model_metrics
-from ml.data import fetch_etf_universe, fetch_market_series, recent_trading_dates
+from ml.data import fetch_etf_universe, fetch_market_context, recent_trading_dates
 from ml.train import (
     attach_outcomes,
     build_dataset,
@@ -69,8 +69,12 @@ def main() -> None:
 
     log.info("Fetching all histories from FDR (this is the slow part)...")
     histories = fetch_universe_histories(universe, desc="fdr")
-    market = fetch_market_series()
-    log.info("Market series rows: %d", len(market))
+    market = fetch_market_context()
+    log.info(
+        "Market context: %d rows, columns: %s",
+        len(market),
+        list(market.columns) if hasattr(market, "columns") else [],
+    )
 
     target_dates = _trading_dates(histories, args.days)
     log.info("Backfilling target dates: %s", [d.date().isoformat() for d in target_dates])

@@ -58,16 +58,48 @@ def recent_trading_dates(df: pd.DataFrame, n: int) -> list[pd.Timestamp]:
 
 KOSPI200_PROXY_SYMBOL = "069500"  # KODEX 200 — index proxy for market regime
 
+# Each entry maps a feature column name to the FDR symbol we use.
+# Failures are tolerated; a missing column is filled with 0 in features.
+MARKET_SOURCES: dict[str, str] = {
+    "Market_KR": "069500",     # KODEX 200 (Korean market proxy)
+    "Market_US500": "US500",   # S&P 500 (US large cap)
+    "Market_NASDAQ": "IXIC",   # Nasdaq Composite (proxies Nasdaq 100)
+    "Market_USDKRW": "USD/KRW",  # Won/Dollar — affects KR-listed US ETFs
+}
 
-def fetch_market_series() -> pd.Series:
-    """Daily return of the KODEX 200 ETF, used as a market regime feature.
-    Returns an empty Series on any error so callers can gracefully fall back."""
+
+def _safe_pct_change(symbol: str) -> pd.Series:
     try:
-        df = fdr.DataReader(KOSPI200_PROXY_SYMBOL)
+        df = fdr.DataReader(symbol)
     except Exception:
         return pd.Series(dtype=float)
     if df.empty or "Close" not in df.columns:
         return pd.Series(dtype=float)
-    series = df["Close"].pct_change().fillna(0.0)
-    series.name = "Market_change"
-    return series
+    return df["Close"].pct_change().fillna(0.0)
+
+
+def fetch_market_context() -> pd.DataFrame:
+    """Daily-return DataFrame for several market proxies, indexed by date.
+
+    Columns: Market_KR, Market_US500, Market_NASDAQ, Market_USDKRW.
+    Each is filled independently — if a single source fails (FDR symbol
+    missing, network blip), that column comes back as an empty series and
+    the join in features.py fills missing dates with 0.
+    """
+    series_map: dict[str, pd.Series] = {}
+    for col, sym in MARKET_SOURCES.items():
+        s = _safe_pct_change(sym)
+        if not s.empty:
+            series_map[col] = s
+    if not series_map:
+        return pd.DataFrame()
+    return pd.concat(series_map, axis=1)
+
+
+def fetch_market_series() -> pd.Series:
+    """Backwards-compat alias kept for older callers — returns just the KR
+    column from `fetch_market_context()`."""
+    df = fetch_market_context()
+    if df.empty or "Market_KR" not in df.columns:
+        return pd.Series(dtype=float)
+    return df["Market_KR"].rename("Market_change")

@@ -48,7 +48,7 @@ from ml.data import (
     closes_around,
     fetch_etf_universe,
     fetch_history,
-    fetch_market_series,
+    fetch_market_context,
     trim_to_cutoff,
 )
 from ml.features import add_features, build_windows
@@ -129,7 +129,7 @@ def build_dataset(
     universe: pd.DataFrame,
     *,
     cutoff: pd.Timestamp | None = None,
-    market: pd.Series | None = None,
+    market: pd.Series | pd.DataFrame | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[str, str, np.ndarray]]]:
     """Sliding-window features over the universe.
 
@@ -146,11 +146,11 @@ def build_dataset(
     date_parts: list[np.ndarray] = []
     today_rows: list[tuple[str, str, np.ndarray]] = []
 
-    market_series: pd.Series | None = None
+    market_data: pd.Series | pd.DataFrame | None = None
     if market is not None and not market.empty:
-        market_series = market.copy()
+        market_data = market.copy()
         if cutoff is not None:
-            market_series = market_series.loc[market_series.index < cutoff]
+            market_data = market_data.loc[market_data.index < cutoff]
 
     for row in universe.itertuples(index=False):
         df = histories.get(row.Symbol)
@@ -159,7 +159,7 @@ def build_dataset(
         try:
             if cutoff is not None:
                 df = trim_to_cutoff(df, cutoff)
-            df_feat = add_features(df, market=market_series)
+            df_feat = add_features(df, market=market_data)
             X, y, dates, today_x = build_windows(
                 df_feat, rise_threshold=RISE_THRESHOLD
             )
@@ -503,8 +503,12 @@ def main() -> None:
     universe = fetch_etf_universe()
     log.info("ETF universe: %d symbols", len(universe))
     histories = fetch_universe_histories(universe)
-    market = fetch_market_series()
-    log.info("Market series rows: %d", len(market))
+    market = fetch_market_context()
+    log.info(
+        "Market context rows: %d, columns: %s",
+        len(market),
+        list(market.columns) if hasattr(market, "columns") else [],
+    )
 
     X, y, dates, today_rows = build_dataset(histories, universe, market=market)
     model, holdout = train_model(X, y, dates)

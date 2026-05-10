@@ -44,11 +44,29 @@ def test_build_windows_short_history_returns_no_today() -> None:
     assert today_x is None
 
 
-def test_add_features_includes_market() -> None:
+def test_add_features_includes_market_dataframe() -> None:
     df = _synthetic_history(150)
-    market = df["Close"].pct_change().fillna(0).rename("Market_change")
+    pc = df["Close"].pct_change().fillna(0)
+    market = pd.DataFrame(
+        {
+            "Market_KR": pc,
+            "Market_US500": pc * 0.5,
+            "Market_NASDAQ": pc * 0.7,
+            "Market_USDKRW": pc * 0.1,
+        }
+    )
     out = add_features(df, market=market)
-    assert "Market_change" in out.columns
+    for col in ("Market_KR", "Market_US500", "Market_NASDAQ", "Market_USDKRW"):
+        assert col in out.columns
     assert "MACD_hist" in out.columns
     assert "BB_pctB" in out.columns
     assert len(out) > 0
+
+
+def test_add_features_legacy_series_market() -> None:
+    """Series input still routed to Market_KR (backwards compat)."""
+    df = _synthetic_history(150)
+    market = df["Close"].pct_change().fillna(0)
+    out = add_features(df, market=market)
+    assert (out["Market_KR"] != 0).any()  # got broadcast in
+    assert (out["Market_US500"] == 0).all()  # other cols zero-filled
