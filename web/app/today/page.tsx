@@ -49,32 +49,28 @@ export default async function TodayPage() {
           ))}
         </section>
       ) : fallback.length > 0 ? (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="space-y-3 p-5">
-            <p className="text-sm font-semibold text-amber-900">
-              정상 추천 기준선(70%) 통과 종목 없음 — 참고용 후보
-            </p>
-            <ul className="space-y-2 text-sm">
-              {fallback.map((p) => (
-                <li
-                  key={p.symbol}
-                  className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2.5 dark:bg-slate-900/60"
-                >
-                  <Link
-                    href={`/etf/${p.symbol}`}
-                    className="font-medium hover:underline"
-                  >
-                    {p.symbol} · {p.name}
-                  </Link>
-                  <span className="text-xs text-slate-600">
-                    확률 {pct(p.probability, 1)} · 정밀도{" "}
-                    {pct(p.precision_band, 1)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <section className="space-y-4">
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <CardContent className="p-5">
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                정상 추천 기준선(70%) 통과 종목 없음 — 아래는 참고용 후보입니다.
+              </p>
+              <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
+                정밀도가 낮은 구간이라 뉴스 등 다른 정보와 함께 검토하세요.
+                검증 기록에 누적되지 않습니다.
+              </p>
+            </CardContent>
+          </Card>
+          {fallback.map((p) => (
+            <PickCard
+              key={p.symbol}
+              symbol={p.symbol}
+              name={p.name}
+              probability={p.probability}
+              articles={p.news_json ?? []}
+            />
+          ))}
+        </section>
       ) : (
         <Card>
           <CardContent className="py-12 text-center">

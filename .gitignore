@@ -9,3 +9,6 @@ venv/
 .ipynb_checkpoints/
 artifacts/
 .DS_Store
+
+.vercel
+.env*.local

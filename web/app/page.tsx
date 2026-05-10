@@ -1,14 +1,13 @@
 import Link from "next/link";
-import { ArrowUpRight, ChartLine, FileText, Newspaper } from "lucide-react";
+import { ArrowUpRight, ChartLine } from "lucide-react";
 import {
   fetchLatestModelMetrics,
   fetchLatestPicks,
   fetchResolvedHistory,
 } from "@/lib/queries";
 import { formatKoreanDate, pct } from "@/lib/format";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { StatTile } from "@/components/ui/stat-tile";
 import { EquityCurve } from "./_components/EquityCurve";
 
 export const revalidate = 300;
@@ -78,29 +77,6 @@ export default async function HomePage() {
         </section>
       )}
 
-      <section>
-        <h2 className="mb-4 text-lg font-bold tracking-tight">자세히 보기</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <NavCard
-            href="/today"
-            title="오늘 상세"
-            desc="추천 종목 카드 + 관련 기사"
-            icon={Newspaper}
-          />
-          <NavCard
-            href="/backtest"
-            title="수익률 시뮬레이션"
-            desc="모델 vs 시장 비교"
-            icon={ChartLine}
-          />
-          <NavCard
-            href="/model"
-            title="모델 정보"
-            desc="피처와 정밀도 곡선"
-            icon={FileText}
-          />
-        </div>
-      </section>
     </div>
   );
 }
@@ -117,66 +93,39 @@ function Hero({
   totalResolved: number;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-700 px-6 py-10 text-white shadow-xl shadow-indigo-500/25 sm:px-10 sm:py-14">
+    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-700 px-6 py-9 text-white shadow-xl shadow-indigo-500/20 sm:px-10 sm:py-12">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(255,255,255,0.18),_transparent_60%)]" />
       <div className="relative">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-indigo-100">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-100">
           Korean ETF · Daily Signal
         </div>
-        <h1 className="mt-3 max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
-          내일 종가 +2.5% 오를 ETF,
-          <br className="hidden sm:block" />
-          AI가 매일 골라드립니다
+        <h1 className="mt-3 max-w-2xl text-2xl font-bold leading-tight tracking-tight sm:text-3xl">
+          내일 종가 +2.5% 오를 ETF, AI가 매일 골라드립니다
         </h1>
-        <p className="mt-4 max-w-2xl text-sm text-indigo-50/95 sm:text-base">
-          한국 ETF 901개를 매일 KST 08시에 학습해, 다음 거래일 종가가 직전
-          거래일 대비 +2.5% 이상 오를 가능성이 높은 종목만을 골라냅니다.
+        <p className="mt-3 max-w-xl text-sm text-indigo-50/90">
+          한국 ETF 901개를 매일 KST 08시에 학습해 가능성이 높은 종목만 추천합니다.
         </p>
         {targetDate && (
-          <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">
-            예측 대상일 · {formatKoreanDate(targetDate)}
+          <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 font-semibold backdrop-blur">
+              예측 대상일 · {formatKoreanDate(targetDate)}
+            </span>
+            <span className="text-indigo-100">
+              오늘 추천 <strong className="text-white">{recommendedCount}건</strong>
+              {empiricalPrecision != null && (
+                <>
+                  {" "}· 누적 정밀도{" "}
+                  <strong className="text-white">
+                    {pct(empiricalPrecision, 1)}
+                  </strong>{" "}
+                  ({totalResolved}건 검증)
+                </>
+              )}
+            </span>
           </div>
         )}
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-          <HeroStat
-            label="오늘 추천"
-            value={`${recommendedCount}건`}
-          />
-          <HeroStat
-            label="누적 검증"
-            value={`${totalResolved}건`}
-          />
-          <HeroStat
-            label="경험적 정밀도"
-            value={
-              empiricalPrecision == null ? "—" : pct(empiricalPrecision, 1)
-            }
-            className="hidden sm:block"
-          />
-        </div>
       </div>
     </section>
-  );
-}
-
-function HeroStat({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`rounded-2xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur ${className ?? ""}`}
-    >
-      <div className="text-[10.5px] font-medium uppercase tracking-wider text-indigo-100">
-        {label}
-      </div>
-      <div className="mt-1 text-xl font-bold tabular-nums text-white">{value}</div>
-    </div>
   );
 }
 
@@ -223,34 +172,66 @@ function FallbackBlock({
   date: string | null;
 }) {
   return (
-    <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
-      <CardHeader>
-        <CardTitle className="text-amber-900 dark:text-amber-200">
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
+        <p className="font-semibold text-amber-900 dark:text-amber-200">
           {formatKoreanDate(date)} · 추천 기준선(70%) 통과 종목 없음
-        </CardTitle>
-        <CardDescription className="text-amber-800 dark:text-amber-200/80">
-          참고용으로만 제공되는 모델이 그래도 가장 가능성을 높게 본 종목입니다.
-          정밀도가 낮은 구간이므로 다른 정보와 함께 검토하세요. 검증 기록에
-          누적되지 않습니다.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {(items ?? []).map((p) => (
+        </p>
+        <p className="mt-1 text-amber-800 dark:text-amber-200/80">
+          아래는 참고용으로만 제공되는 후보입니다 · 검증 기록 미포함
+        </p>
+      </div>
+      {(items ?? []).map((p) => (
+        <Card key={p.symbol} className="overflow-hidden">
           <Link
-            key={p.symbol}
             href={`/etf/${p.symbol}`}
-            className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2.5 text-sm transition hover:bg-white dark:bg-slate-900/60 dark:hover:bg-slate-900"
+            className="flex items-center justify-between gap-4 border-b border-slate-100 p-4 transition hover:bg-indigo-50/40 dark:border-slate-800 dark:hover:bg-slate-800/40"
           >
-            <span className="font-medium">
-              {p.symbol} · {p.name}
-            </span>
-            <span className="text-xs text-slate-600 dark:text-slate-400">
-              확률 {pct(p.probability, 1)} · 정밀도 {pct(p.precision_band, 1)}
-            </span>
+            <div className="min-w-0">
+              <div className="font-mono text-[11px] text-slate-400">
+                {p.symbol}
+              </div>
+              <div className="truncate font-semibold">{p.name}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                {pct(p.probability, 1)}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                정밀도 {pct(p.precision_band, 1)}
+              </div>
+            </div>
           </Link>
-        ))}
-      </CardContent>
-    </Card>
+          {p.news_json && p.news_json.length > 0 && (
+            <div className="grid gap-2 p-4">
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                관련 기사
+              </div>
+              {p.news_json.slice(0, 3).map((a, i) => (
+                <a
+                  key={i}
+                  href={a.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-lg border border-slate-200 bg-white p-2.5 text-sm transition hover:border-indigo-400 hover:bg-indigo-50/40 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-500"
+                >
+                  <div className="text-[11px] text-slate-500">
+                    {a.source && (
+                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-semibold dark:bg-slate-700">
+                        {a.source}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-[13px] font-medium">
+                    {a.title}
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
   );
 }
 
@@ -273,35 +254,3 @@ function EmptyPicks({ date }: { date: string | null }) {
   );
 }
 
-function NavCard({
-  href,
-  title,
-  desc,
-  icon: Icon,
-}: {
-  href: string;
-  title: string;
-  desc: string;
-  icon: React.ElementType;
-}) {
-  return (
-    <Link href={href} className="group">
-      <Card className="h-full transition group-hover:-translate-y-0.5 group-hover:border-indigo-400 group-hover:shadow-md dark:group-hover:border-indigo-500">
-        <CardContent className="flex items-start gap-3 p-4">
-          <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
-            <Icon className="h-4 w-4" />
-          </div>
-          <div className="flex-1">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              {title}
-            </div>
-            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {desc}
-            </div>
-          </div>
-          <ArrowUpRight className="h-4 w-4 text-slate-400 transition group-hover:text-indigo-500 dark:text-slate-500" />
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
