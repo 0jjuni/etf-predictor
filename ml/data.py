@@ -54,3 +54,20 @@ def closes_around(df: pd.DataFrame, target: pd.Timestamp) -> tuple[float, float]
 def recent_trading_dates(df: pd.DataFrame, n: int) -> list[pd.Timestamp]:
     """The last n trading dates from a reference history (most recent first)."""
     return list(df.index[-n:][::-1])
+
+
+KOSPI200_PROXY_SYMBOL = "069500"  # KODEX 200 — index proxy for market regime
+
+
+def fetch_market_series() -> pd.Series:
+    """Daily return of the KODEX 200 ETF, used as a market regime feature.
+    Returns an empty Series on any error so callers can gracefully fall back."""
+    try:
+        df = fdr.DataReader(KOSPI200_PROXY_SYMBOL)
+    except Exception:
+        return pd.Series(dtype=float)
+    if df.empty or "Close" not in df.columns:
+        return pd.Series(dtype=float)
+    series = df["Close"].pct_change().fillna(0.0)
+    series.name = "Market_change"
+    return series

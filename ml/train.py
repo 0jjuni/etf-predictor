@@ -23,8 +23,8 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import classification_report
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from xgboost import XGBClassifier
 
@@ -48,6 +48,7 @@ from ml.data import (
     closes_around,
     fetch_etf_universe,
     fetch_history,
+    fetch_market_series,
     trim_to_cutoff,
 )
 from ml.features import add_features, build_windows
@@ -128,15 +129,28 @@ def build_dataset(
     universe: pd.DataFrame,
     *,
     cutoff: pd.Timestamp | None = None,
-) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str, np.ndarray]]]:
+    market: pd.Series | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[str, str, np.ndarray]]]:
     """Sliding-window features over the universe.
 
     If `cutoff` is given, every history is first trimmed to rows strictly
     before that timestamp — used by backfill to prevent target-date leakage.
+    `market` is an optional daily-return series joined into each ETF's
+    feature frame.
+
+    Returns (X, y, dates, today_rows). `dates` is one YYYY-MM-DD string per
+    training sample; used downstream for time-aware holdout splits.
     """
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
+    date_parts: list[np.ndarray] = []
     today_rows: list[tuple[str, str, np.ndarray]] = []
+
+    market_series: pd.Series | None = None
+    if market is not None and not market.empty:
+        market_series = market.copy()
+        if cutoff is not None:
+            market_series = market_series.loc[market_series.index < cutoff]
 
     for row in universe.itertuples(index=False):
         df = histories.get(row.Symbol)
@@ -145,8 +159,10 @@ def build_dataset(
         try:
             if cutoff is not None:
                 df = trim_to_cutoff(df, cutoff)
-            df = add_features(df)
-            X, y, today_x = build_windows(df, rise_threshold=RISE_THRESHOLD)
+            df_feat = add_features(df, market=market_series)
+            X, y, dates, today_x = build_windows(
+                df_feat, rise_threshold=RISE_THRESHOLD
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("skip build %s (%s): %s", row.Symbol, row.Name, e)
             continue
@@ -154,13 +170,19 @@ def build_dataset(
         if len(X) > 0:
             X_parts.append(X)
             y_parts.append(y)
+            date_parts.append(dates)
         if today_x is not None:
             today_rows.append((row.Symbol, row.Name, today_x))
 
     if not X_parts:
         raise RuntimeError("No training samples produced — check FDR/network")
 
-    return np.vstack(X_parts), np.concatenate(y_parts), today_rows
+    return (
+        np.vstack(X_parts),
+        np.concatenate(y_parts),
+        np.concatenate(date_parts),
+        today_rows,
+    )
 
 
 def compute_threshold_curve(y_true: np.ndarray, proba: np.ndarray) -> list[dict]:
@@ -194,23 +216,88 @@ def compute_threshold_curve(y_true: np.ndarray, proba: np.ndarray) -> list[dict]
     return rows
 
 
-def train_model(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
-    """Train on 80% of (X, y), report on the holdout, then refit on full data.
+def _time_holdout_split(
+    X: np.ndarray,
+    y: np.ndarray,
+    dates: np.ndarray,
+    test_fraction: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Walk-forward style holdout: most recent `test_fraction` of unique dates
+    become the test set; everything older is the training set.
 
-    Returns (model fit on full X/y, holdout dict with curve + summary stats).
+    Compared to a random split this avoids same-day cross-section leakage
+    and overlapping-window memorization, so reported precision tracks the
+    walk-forward backfill numbers (≈ what the user actually sees in prod).
+    """
+    unique_dates = np.unique(dates)
+    if len(unique_dates) < 5:
+        # Too few distinct dates to split chronologically — fall back to a
+        # plain random split keeping stratification.
+        from sklearn.model_selection import train_test_split
+
+        train_x, test_x, train_y, test_y = train_test_split(
+            X, y, test_size=test_fraction, random_state=42, stratify=y
+        )
+        return train_x, test_x, train_y, test_y
+
+    cutoff_idx = int(len(unique_dates) * (1 - test_fraction))
+    cutoff_date = unique_dates[cutoff_idx]
+    train_mask = dates < cutoff_date
+    test_mask = ~train_mask
+    return X[train_mask], X[test_mask], y[train_mask], y[test_mask]
+
+
+def _build_calibrated_model(train_x, train_y) -> object:
+    """Fit an XGBoost classifier inside CalibratedClassifierCV (isotonic).
+
+    The wrapper internally splits the training data into k folds, fits an
+    XGBoost on k-1 folds, and learns an isotonic mapping on the held-out
+    fold. Final predict_proba returns calibrated probabilities — when we
+    say 'this ETF has 70% rise probability', it should actually align with
+    a ~70% empirical hit rate on holdout.
+    """
+    base = XGBClassifier(**XGB_PARAMS)
+    # cv=3 keeps training time reasonable on the GH Actions CPU runner.
+    return CalibratedClassifierCV(base, method="isotonic", cv=3).fit(
+        train_x, train_y
+    )
+
+
+def train_model(
+    X: np.ndarray,
+    y: np.ndarray,
+    dates: np.ndarray | None = None,
+) -> tuple[object, dict]:
+    """Time-aware train/holdout, isotonic calibration, refit on full data.
+
+    Returns (calibrated model fit on full X/y, holdout summary dict).
     """
     log.info("Training set: %s, positive rate=%.4f", X.shape, y.mean())
 
-    train_x, test_x, train_y, test_y = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    model = XGBClassifier(**XGB_PARAMS)
-    model.fit(train_x, train_y)
+    if dates is None:
+        # legacy path — random split, kept for callers that haven't been
+        # updated yet; new code passes dates.
+        from sklearn.model_selection import train_test_split
+
+        train_x, test_x, train_y, test_y = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        log.warning("train_model called without dates — using random split (legacy)")
+    else:
+        train_x, test_x, train_y, test_y = _time_holdout_split(X, y, dates)
+        log.info(
+            "Time-based holdout: train=%d, test=%d (fraction=%.2f)",
+            len(train_y),
+            len(test_y),
+            len(test_y) / max(len(y), 1),
+        )
+
+    model = _build_calibrated_model(train_x, train_y)
 
     proba = model.predict_proba(test_x)[:, 1]
     log.info(
         "Holdout report (threshold=0.5):\n%s",
-        classification_report(test_y, model.predict(test_x)),
+        classification_report(test_y, (proba >= 0.5).astype(int)),
     )
     log.info(
         "Holdout report (threshold=%.2f):\n%s",
@@ -220,8 +307,8 @@ def train_model(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
 
     curve = compute_threshold_curve(test_y, proba)
 
-    log.info("Refitting on full dataset")
-    model.fit(X, y)
+    log.info("Refitting calibrated model on full dataset")
+    model = _build_calibrated_model(X, y)
 
     return model, {
         "test_size": int(len(test_y)),
@@ -231,7 +318,7 @@ def train_model(X: np.ndarray, y: np.ndarray) -> tuple[XGBClassifier, dict]:
 
 
 def make_predictions(
-    model: XGBClassifier,
+    model: object,
     today_rows: list[tuple[str, str, np.ndarray]],
     target_date: str,
 ) -> list[dict]:
@@ -258,7 +345,7 @@ def make_predictions(
 
 
 def compute_all_probabilities(
-    model: XGBClassifier,
+    model: object,
     today_rows: list[tuple[str, str, np.ndarray]],
     target_date: str,
 ) -> list[dict]:
@@ -291,7 +378,7 @@ def _precision_at_band(prob: float, curve: list[dict]) -> float | None:
 
 
 def compute_fallback_picks(
-    model: XGBClassifier,
+    model: object,
     today_rows: list[tuple[str, str, np.ndarray]],
     holdout_curve: list[dict],
     *,
@@ -397,7 +484,7 @@ def resolve_pending(histories: dict[str, pd.DataFrame]) -> int:
     return resolved
 
 
-def save_model(model: XGBClassifier) -> Path:
+def save_model(model: object) -> Path:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     path = ARTIFACT_DIR / MODEL_FILENAME
     joblib.dump({"model": model, "window": WINDOW, "rise_threshold": RISE_THRESHOLD}, path)
@@ -416,9 +503,11 @@ def main() -> None:
     universe = fetch_etf_universe()
     log.info("ETF universe: %d symbols", len(universe))
     histories = fetch_universe_histories(universe)
+    market = fetch_market_series()
+    log.info("Market series rows: %d", len(market))
 
-    X, y, today_rows = build_dataset(histories, universe)
-    model, holdout = train_model(X, y)
+    X, y, dates, today_rows = build_dataset(histories, universe, market=market)
+    model, holdout = train_model(X, y, dates)
     save_model(model)
 
     all_proba = compute_all_probabilities(model, today_rows, target_date)

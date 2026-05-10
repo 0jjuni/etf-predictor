@@ -23,9 +23,16 @@ MODEL_FILENAME: str = "etf_xgb.joblib"
 XGB_PARAMS: dict = {
     "tree_method": "hist",
     "device": os.environ.get("XGB_DEVICE", "cpu"),
-    "n_estimators": 300,
-    "max_depth": 6,
-    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "max_depth": 5,
+    "learning_rate": 0.04,
+    # Variance-reduction tweaks for noisy financial data:
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "gamma": 0.05,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.5,
     "n_jobs": -1,
     "eval_metric": "logloss",
 }
