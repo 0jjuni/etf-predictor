@@ -176,6 +176,27 @@ st.markdown(
       /* Section divider — subtler than default */
       hr { margin: 1.6rem 0; border: 0; border-top: 1px solid var(--slate-200); }
 
+      /* Browse list buttons — make st.button look like clickable list rows */
+      .browse-list .stButton > button {
+        text-align: left;
+        justify-content: flex-start;
+        background: white;
+        border: 1px solid var(--slate-200);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-weight: 500;
+        font-size: 0.9rem;
+        color: var(--slate-800);
+        transition: border-color 0.15s ease, background 0.15s ease;
+        white-space: normal;
+        line-height: 1.4;
+      }
+      .browse-list .stButton > button:hover {
+        border-color: var(--primary);
+        background: var(--primary-bg);
+        color: var(--primary);
+      }
+
       /* News cards */
       .news-list {
         display: flex;
@@ -567,7 +588,7 @@ with tab_browse:
 
         search = st.text_input(
             "검색",
-            placeholder="종목명(예: TIGER 200) 또는 코드(예: 069500) — 키워드로 필터",
+            placeholder="종목명(예: TIGER 200) 또는 코드(예: 069500)",
             label_visibility="collapsed",
         ).strip()
 
@@ -578,63 +599,75 @@ with tab_browse:
                 search, case=False, na=False, regex=False
             )
             filtered = universe_df[mask].reset_index(drop=True)
-            st.caption(f"검색 결과 {len(filtered):,}개")
         else:
-            filtered = universe_df.head(30).reset_index(drop=True)
-            st.caption(f"상위 {len(filtered)}개 표시 — 검색하면 전체에서 필터됩니다.")
+            filtered = universe_df.head(20).reset_index(drop=True)
 
         if filtered.empty:
             st.warning(f'"{search}"와 일치하는 ETF가 없어요.')
         else:
-            display = pd.DataFrame(
-                {
-                    "순위": filtered["rank"].astype(int),
-                    "코드": filtered["symbol"],
-                    "종목명": filtered["name"],
-                    "상승확률": (filtered["probability"].astype(float) * 100).round(1),
-                }
+            # Keep selection in session_state. If the current pick is no longer
+            # in the filtered set (e.g., the search just changed), fall back to
+            # the top match.
+            current_pick = st.session_state.get("browse_pick")
+            in_filtered = (
+                current_pick is not None
+                and current_pick in filtered["symbol"].values
             )
-            event = st.dataframe(
-                display,
-                use_container_width=True,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                column_config={
-                    "순위": st.column_config.NumberColumn(width="small"),
-                    "코드": st.column_config.TextColumn(width="small"),
-                    "상승확률": st.column_config.ProgressColumn(
-                        format="%.1f%%", min_value=0, max_value=100
-                    ),
-                },
+            if not in_filtered:
+                current_pick = filtered.iloc[0]["symbol"]
+                st.session_state.browse_pick = current_pick
+
+            selected = universe_df[universe_df["symbol"] == current_pick].iloc[0]
+
+            # Detail block (hero — always shown)
+            prob_pct = float(selected["probability"]) * 100
+            rank = int(selected["rank"])
+            total = len(universe_df)
+            recommended = prob_pct >= 70
+
+            st.subheader(f"{selected['symbol']}  ·  {selected['name']}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("상승 확률", f"{prob_pct:.1f}%")
+            c2.metric("전체 순위", f"{rank} / {total}")
+            c3.metric(
+                "추천 여부",
+                "추천" if recommended else "기준 미달",
+                help="확률 70% 이상이면 추천 종목 탭에 노출됩니다.",
             )
 
-            selected_rows = (event.get("selection") or {}).get("rows", [])
-            if selected_rows:
-                row = filtered.iloc[selected_rows[0]]
-                st.divider()
+            st.subheader("관련 기사")
+            with st.spinner("최신 기사 불러오는 중..."):
+                articles = _live_news(selected["name"])
+            st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
 
-                prob_pct = float(row["probability"]) * 100
-                rank = int(row["rank"])
-                total = len(universe_df)
-                recommended = prob_pct >= 70
+            st.divider()
 
-                st.subheader(f"{row['symbol']}  ·  {row['name']}")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("상승 확률", f"{prob_pct:.1f}%")
-                c2.metric("전체 순위", f"{rank} / {total}")
-                c3.metric(
-                    "추천 여부",
-                    "추천 종목" if recommended else "기준 미달",
-                    help="확률 70% 이상이면 추천 종목 탭에 노출됩니다.",
-                )
+            # Other results — clickable list to switch the selected ETF
+            others = filtered[filtered["symbol"] != current_pick].reset_index(drop=True)
+            list_label = (
+                f"검색 결과 {len(filtered):,}개 (현재 선택 1개 제외 {len(others)}개 표시)"
+                if search
+                else f"상위 {len(filtered)}개 중 다른 후보 (현재 선택 제외)"
+            )
+            st.caption(list_label)
 
-                st.subheader("관련 기사")
-                with st.spinner("최신 기사 불러오는 중..."):
-                    articles = _live_news(row["name"])
-                st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
+            if others.empty:
+                st.caption("다른 결과가 없습니다.")
             else:
-                st.caption("표에서 종목을 선택하면 상세 정보와 관련 기사가 표시됩니다.")
+                st.markdown("<div class='browse-list'>", unsafe_allow_html=True)
+                for _, row in others.iterrows():
+                    label = (
+                        f"#{int(row['rank'])}   {row['symbol']}   {row['name']}"
+                        f"   ·   {float(row['probability']) * 100:.1f}%"
+                    )
+                    if st.button(
+                        label,
+                        key=f"browse_pick_{row['symbol']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.browse_pick = row["symbol"]
+                        st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
