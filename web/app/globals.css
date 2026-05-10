@@ -7,6 +7,9 @@
 @import "@fontsource/pretendard/700.css";
 @import "@fontsource/pretendard/800.css";
 
+/* Tailwind v4 dark-mode strategy: opt into class-based via @custom-variant */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --font-sans:
     "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
@@ -18,16 +21,17 @@ html {
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "ss01", "ss02", "tnum";
   letter-spacing: -0.011em;
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   font-family: var(--font-sans);
   font-weight: 400;
-  color: #0f172a;
-  background: #fafafa;
 }
-
-/* Tabular numbers for any element with `tabular-nums` className handled by Tailwind. */
 
 /* prose-* used on /about, /disclaimer, /privacy */
 .prose h1 {
@@ -35,7 +39,10 @@ body {
   font-weight: 800;
   letter-spacing: -0.02em;
   margin-bottom: 1.5rem;
-  color: #0f172a;
+  color: rgb(15 23 42);
+}
+.dark .prose h1 {
+  color: rgb(241 245 249);
 }
 .prose h2 {
   font-size: 1.25rem;
@@ -43,13 +50,20 @@ body {
   letter-spacing: -0.015em;
   margin-top: 2rem;
   margin-bottom: 0.75rem;
-  color: #0f172a;
+  color: rgb(15 23 42);
+}
+.dark .prose h2 {
+  color: rgb(241 245 249);
 }
 .prose p,
 .prose li {
   font-size: 0.95rem;
   line-height: 1.7;
-  color: #334155;
+  color: rgb(51 65 85);
+}
+.dark .prose p,
+.dark .prose li {
+  color: rgb(203 213 225);
 }
 .prose ul {
   margin-top: 0.75rem;
@@ -61,11 +75,17 @@ body {
   margin-bottom: 0.4rem;
 }
 .prose a {
-  color: #4f46e5;
+  color: rgb(79 70 229);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.dark .prose a {
+  color: rgb(165 180 252);
+}
 .prose strong {
-  color: #0f172a;
+  color: rgb(15 23 42);
   font-weight: 600;
+}
+.dark .prose strong {
+  color: rgb(241 245 249);
 }

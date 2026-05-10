@@ -110,7 +110,7 @@ export default async function EtfPage({
         ) : (
           <Card className="overflow-hidden">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
+              <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold">날짜</th>
                   <th className="px-4 py-3 text-right font-semibold">예측 확률</th>
@@ -118,10 +118,10 @@ export default async function EtfPage({
                   <th className="px-4 py-3 text-right font-semibold">결과</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {hist.map((r) => (
                   <tr key={r.target_date}>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">
                       {r.target_date}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">
@@ -149,8 +149,8 @@ export default async function EtfPage({
         )}
       </section>
 
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="p-4 text-xs text-amber-900">
+      <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <CardContent className="p-4 text-xs text-amber-900 dark:text-amber-200">
           본 페이지는 정보 제공 목적이며, 투자 권유가 아닙니다. 모델은 과거
           가격·모멘텀 패턴만 학습한 결과로 시장 급변에 약합니다.
         </CardContent>

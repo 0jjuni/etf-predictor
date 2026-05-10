@@ -3,10 +3,10 @@ import { cn } from "@/lib/utils";
 type Tone = "default" | "positive" | "negative" | "muted";
 
 const toneClass: Record<Tone, string> = {
-  default: "text-slate-900",
-  positive: "text-emerald-600",
-  negative: "text-rose-600",
-  muted: "text-slate-500",
+  default: "text-slate-900 dark:text-slate-100",
+  positive: "text-emerald-600 dark:text-emerald-400",
+  negative: "text-rose-600 dark:text-rose-400",
+  muted: "text-slate-500 dark:text-slate-400",
 };
 
 interface StatTileProps {
@@ -27,11 +27,11 @@ export function StatTile({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm",
+        "rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900",
         className,
       )}
     >
-      <div className="text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+      <div className="text-[10.5px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
         {label}
       </div>
       <div
@@ -43,7 +43,9 @@ export function StatTile({
         {value}
       </div>
       {hint && (
-        <div className="mt-0.5 text-xs text-slate-500">{hint}</div>
+        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          {hint}
+        </div>
       )}
     </div>
   );

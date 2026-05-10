@@ -67,7 +67,7 @@ export default async function ModelPage() {
         <CardHeader>
           <CardTitle>왜 정밀도(Precision)에 집중하나요?</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-700">
+        <CardContent className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
           <p>
             실제 투자에 쓸 수 있는 자금은 한정적입니다. 그래서 이 모델은 &ldquo;많이
             맞히는 것&rdquo;보다{" "}
@@ -134,12 +134,12 @@ export default async function ModelPage() {
         </Card>
       )}
 
-      <Card className="border-amber-200 bg-amber-50">
+      <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
         <CardHeader>
-          <CardTitle className="text-amber-900">유의사항</CardTitle>
+          <CardTitle className="text-amber-900 dark:text-amber-200">유의사항</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-1.5 text-xs text-amber-900">
+          <ul className="space-y-1.5 text-xs text-amber-900 dark:text-amber-200">
             <li>모델은 과거 패턴 기반이며 시장 급변에는 약합니다</li>
             <li>거래량·시가총액이 작은 ETF는 신호의 신뢰도가 떨어집니다</li>
             <li>합성·레버리지·선물·인버스 ETF는 학습·예측에서 제외됩니다</li>
@@ -161,12 +161,14 @@ function FeatureCard({
   desc: string;
 }) {
   return (
-    <li className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div className="text-[10.5px] font-medium uppercase tracking-wider text-slate-500">
+    <li className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+      <div className="text-[10.5px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
         {tag}
       </div>
-      <div className="mt-1 text-base font-semibold text-slate-900">{title}</div>
-      <div className="mt-1 text-xs text-slate-600">{desc}</div>
+      <div className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
+        {title}
+      </div>
+      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{desc}</div>
     </li>
   );
 }

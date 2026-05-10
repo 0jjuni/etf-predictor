@@ -43,7 +43,7 @@ export default async function HomePage() {
         <header className="flex items-baseline justify-between">
           <div>
             <h2 className="text-lg font-bold tracking-tight">오늘의 추천</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
+            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
               상승확률 70% 이상으로 모델이 골라낸 종목입니다.
             </p>
           </div>
@@ -65,7 +65,7 @@ export default async function HomePage() {
         <section>
           <header className="mb-4">
             <h2 className="text-lg font-bold tracking-tight">추천대로 샀다면?</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
+            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
               매일 추천 종목을 동일 비중으로 매수해 다음 거래일 종가에 매도했다고
               가정한 누적 자산 가치 곡선입니다.
             </p>
@@ -223,12 +223,12 @@ function FallbackBlock({
   date: string | null;
 }) {
   return (
-    <Card className="border-amber-200 bg-amber-50">
+    <Card className="border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
       <CardHeader>
-        <CardTitle className="text-amber-900">
+        <CardTitle className="text-amber-900 dark:text-amber-200">
           {formatKoreanDate(date)} · 추천 기준선(70%) 통과 종목 없음
         </CardTitle>
-        <CardDescription className="text-amber-800">
+        <CardDescription className="text-amber-800 dark:text-amber-200/80">
           참고용으로만 제공되는 모델이 그래도 가장 가능성을 높게 본 종목입니다.
           정밀도가 낮은 구간이므로 다른 정보와 함께 검토하세요. 검증 기록에
           누적되지 않습니다.
@@ -239,12 +239,12 @@ function FallbackBlock({
           <Link
             key={p.symbol}
             href={`/etf/${p.symbol}`}
-            className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2.5 text-sm transition hover:bg-white"
+            className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2.5 text-sm transition hover:bg-white dark:bg-slate-900/60 dark:hover:bg-slate-900"
           >
             <span className="font-medium">
               {p.symbol} · {p.name}
             </span>
-            <span className="text-xs text-slate-600">
+            <span className="text-xs text-slate-600 dark:text-slate-400">
               확률 {pct(p.probability, 1)} · 정밀도 {pct(p.precision_band, 1)}
             </span>
           </Link>
@@ -258,13 +258,13 @@ function EmptyPicks({ date }: { date: string | null }) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-        <div className="rounded-full bg-slate-100 p-3 text-slate-500">
+        <div className="rounded-full bg-slate-100 p-3 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
           <ChartLine className="h-5 w-5" />
         </div>
-        <p className="text-sm font-semibold text-slate-700">
+        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
           {date ? `${formatKoreanDate(date)} ` : ""}추천할 종목이 없습니다.
         </p>
-        <p className="max-w-sm text-xs text-slate-500">
+        <p className="max-w-sm text-xs text-slate-500 dark:text-slate-400">
           모델은 모든 한국 ETF에 대해 상승 확률을 계산했지만, 추천 기준선(70%)을
           넘는 종목이 없었습니다. 시장이 잠잠한 날이라는 뜻입니다.
         </p>
@@ -286,16 +286,20 @@ function NavCard({
 }) {
   return (
     <Link href={href} className="group">
-      <Card className="h-full transition group-hover:-translate-y-0.5 group-hover:border-indigo-400 group-hover:shadow-md">
+      <Card className="h-full transition group-hover:-translate-y-0.5 group-hover:border-indigo-400 group-hover:shadow-md dark:group-hover:border-indigo-500">
         <CardContent className="flex items-start gap-3 p-4">
-          <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600">
+          <div className="rounded-lg bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
             <Icon className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-semibold text-slate-900">{title}</div>
-            <div className="mt-0.5 text-xs text-slate-500">{desc}</div>
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {title}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {desc}
+            </div>
           </div>
-          <ArrowUpRight className="h-4 w-4 text-slate-400 transition group-hover:text-indigo-500" />
+          <ArrowUpRight className="h-4 w-4 text-slate-400 transition group-hover:text-indigo-500 dark:text-slate-500" />
         </CardContent>
       </Card>
     </Link>
