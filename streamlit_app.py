@@ -562,41 +562,79 @@ with tab_browse:
         )
         st.caption(
             f"전체 ETF {len(universe_df):,}개의 모델 추정 확률을 검색할 수 있어요. "
-            "확률이 70% 미만이어도 모델이 어떻게 보고 있는지 확인 가능합니다."
+            "70% 미만이어도 모델이 그 종목을 어떻게 보고 있는지 확인 가능합니다."
         )
 
-        options = [
-            f"{row['symbol']}  {row['name']}"
-            for _, row in universe_df.iterrows()
-        ]
-        choice_label = st.selectbox(
-            "ETF 검색",
-            options=options,
-            index=0,
-            placeholder="종목명 또는 코드로 검색...",
-        )
-        if choice_label:
-            selected_symbol = choice_label.split()[0]
-            row = universe_df[universe_df["symbol"] == selected_symbol].iloc[0]
-            prob_pct = float(row["probability"]) * 100
-            rank = int(row["rank"])
-            total = len(universe_df)
-            recommended = prob_pct >= 70
+        search = st.text_input(
+            "검색",
+            placeholder="종목명(예: TIGER 200) 또는 코드(예: 069500) — 키워드로 필터",
+            label_visibility="collapsed",
+        ).strip()
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("상승 확률", f"{prob_pct:.1f}%")
-            c2.metric("전체 순위", f"{rank} / {total}")
-            c3.metric(
-                "추천 여부",
-                "추천 종목" if recommended else "기준 미달",
-                help="확률 70% 이상이면 추천 종목 탭에 노출됩니다.",
+        if search:
+            mask = universe_df["name"].str.contains(
+                search, case=False, na=False, regex=False
+            ) | universe_df["symbol"].str.contains(
+                search, case=False, na=False, regex=False
+            )
+            filtered = universe_df[mask].reset_index(drop=True)
+            st.caption(f"검색 결과 {len(filtered):,}개")
+        else:
+            filtered = universe_df.head(30).reset_index(drop=True)
+            st.caption(f"상위 {len(filtered)}개 표시 — 검색하면 전체에서 필터됩니다.")
+
+        if filtered.empty:
+            st.warning(f'"{search}"와 일치하는 ETF가 없어요.')
+        else:
+            display = pd.DataFrame(
+                {
+                    "순위": filtered["rank"].astype(int),
+                    "코드": filtered["symbol"],
+                    "종목명": filtered["name"],
+                    "상승확률": (filtered["probability"].astype(float) * 100).round(1),
+                }
+            )
+            event = st.dataframe(
+                display,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                column_config={
+                    "순위": st.column_config.NumberColumn(width="small"),
+                    "코드": st.column_config.TextColumn(width="small"),
+                    "상승확률": st.column_config.ProgressColumn(
+                        format="%.1f%%", min_value=0, max_value=100
+                    ),
+                },
             )
 
-            st.divider()
-            st.subheader("관련 기사")
-            with st.spinner("최신 기사 불러오는 중..."):
-                articles = _live_news(row["name"])
-            st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
+            selected_rows = (event.get("selection") or {}).get("rows", [])
+            if selected_rows:
+                row = filtered.iloc[selected_rows[0]]
+                st.divider()
+
+                prob_pct = float(row["probability"]) * 100
+                rank = int(row["rank"])
+                total = len(universe_df)
+                recommended = prob_pct >= 70
+
+                st.subheader(f"{row['symbol']}  ·  {row['name']}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("상승 확률", f"{prob_pct:.1f}%")
+                c2.metric("전체 순위", f"{rank} / {total}")
+                c3.metric(
+                    "추천 여부",
+                    "추천 종목" if recommended else "기준 미달",
+                    help="확률 70% 이상이면 추천 종목 탭에 노출됩니다.",
+                )
+
+                st.subheader("관련 기사")
+                with st.spinner("최신 기사 불러오는 중..."):
+                    articles = _live_news(row["name"])
+                st.markdown(_render_news_cards(articles), unsafe_allow_html=True)
+            else:
+                st.caption("표에서 종목을 선택하면 상세 정보와 관련 기사가 표시됩니다.")
 
 
 # --------------------------------------------------------------------------- #
